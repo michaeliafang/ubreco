@@ -83,6 +83,9 @@ private:
   // maximum tick-value for beam-related drift-window
   float fBeamDriftTickMax;
   double fROI; // in cm, spherical region around vertex to use for clustering
+  // exclude hits near the vertex
+  bool fExcludeVtxHits;
+  double fExcludeVtxRadius;
 
   // Proximity clusterer class
   gammacatcher::ProximityClusterer* _ProximityClusterer;
@@ -112,6 +115,8 @@ ProximityClustering::ProximityClustering(fhicl::ParameterSet const & p)
   fBeamDriftTickMin = p.get<float>      ("BeamDriftTickMin");
   fBeamDriftTickMax = p.get<float>      ("BeamDriftTickMax");
   fROI              = p.get<double>     ("ROI"          );
+  fExcludeVtxHits   = p.get<bool>       ("ExcludeVtxHits");
+  fExcludeVtxRadius = p.get<double>     ("ExcludeVtxRadius");
 
 }
 
@@ -144,6 +149,10 @@ void ProximityClustering::produce(art::Event & e)
 
   // cluster index vectors will be stored here
   std::vector<std::vector<unsigned int> > cluster_v;
+  // set exclude hits near vertex
+  if (fExcludeVtxHits && fExcludeVtxRadius > 0.0){
+    _ProximityClusterer->setExcludeVtxHits(fExcludeVtxRadius);
+  }
   // cluster hits together
   _ProximityClusterer->cluster(hit_h,cluster_v);
 

@@ -9,6 +9,8 @@ ProximityClustering: {
  ROI           : 150
  BeamDriftTickMin : 780
  BeamDriftTickMax : 5500
+ ExcludeVtxHits: true
+ ExcludeVtxRadius: 3.0
 }
 
 END_PROLOG

@@ -243,6 +243,24 @@ namespace gammacatcher {
     if (h1.WireID().Plane != h2.WireID().Plane)
       return false;
 
+    // Exclude hits in a certain radius of the vertex if searching for ex. e+e- topology
+    if (_vertex && _excludeVtxHits){
+      int pl = h1.WireID().Plane;
+
+      double t1 = h1.PeakTime()*_time2cm;
+      double w1 = h1.WireID().Wire*_wire2cm;
+
+      double t2 = h2.PeakTime()*_time2cm;
+      double w2 = h2.WireID().Wire*_wire2cm;
+
+      double d1 = (t1 - _vtx_t_cm[pl])*(t1 - _vtx_t_cm[pl]) + (w1 - _vtx_w_cm[pl])*(w1 - _vtx_w_cm[pl]);
+
+      double d2 = (t2 - _vtx_t_cm[pl])*(t2 - _vtx_t_cm[pl]) + (w2 - _vtx_w_cm[pl])*(w2 - _vtx_w_cm[pl]);
+
+      if (d1 < _excludeVtxRSq && d2 < _excludeVtxRSq)
+        return false;
+    }
+
     double dt = ( h1.PeakTime() - h2.PeakTime() ) * _time2cm;
     //  if the hit time-ranges overlap, this distnce should be 0
     if (TimeOverlap(h1,h2,dt) == true)

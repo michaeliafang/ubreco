@@ -75,6 +75,12 @@ namespace gammacatcher {
                     detinfo::DetectorPropertiesData const& detProp,
                     const art::ValidHandle<std::vector<::recob::Vertex> > vtx_h,
 		    const double& ROI);
+
+    /// Turning on the excludeVtxHits option
+    void setExcludeVtxHits(double r){
+      _excludeVtxHits = true;
+      _excludeVtxRSq = r*r;
+    }
     
   protected:
 
@@ -121,6 +127,10 @@ namespace gammacatcher {
     /// vertex coordinates
     std::vector<double> _vtx_w_cm;
     std::vector<double> _vtx_t_cm;
+
+    /// exclude hits within a certain radius for clustering if ex. e+e- topology
+    bool _excludeVtxHits = false;
+    double _excludeVtxRSq = 0;
 
   };
 }
