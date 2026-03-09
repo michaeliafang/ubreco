@@ -50,6 +50,9 @@ namespace clusmtool {
     size_t _min_nhits;
 
     bool _run_shower_merge_algo;
+    // merge hits near the vertex excluded from proximity clustering
+    bool _proximity_excludeVtxRadius;
+    double _enable_merge_excludedVtxHits;
   };
 
   //----------------------------------------
@@ -71,6 +74,8 @@ namespace clusmtool {
     _merge_till_converge   = pset.get<bool >("mergetillconverge");
     _verbose               = pset.get<bool> ("verbose",false);
     _run_shower_merge_algo = pset.get<bool> ("run_shower_merge_algo",true);
+    _proximity_excludeVtxRadius    = pset.get<double> ("proximity_excludeVtxRadius");
+    _enable_merge_excludedVtxHits = pset.get<bool> ("enable_merge_excludedVtxHits");
 
     std::cout << "DD \t MIN NHITS "  << _min_nhits << std::endl;
     std::cout << "DD \t verbose is " << _verbose   << std::endl;
@@ -190,7 +195,44 @@ namespace clusmtool {
 	auto clus_angle = clus.second;
 	auto cluster    = clus_v.at(clus_idx);
 
-	// skip clusters with less then threshold of hits
+	// merge hits near the vertex excluded during proximity clustering back into gamma00 and gamma01
+        if (cluster.size() == 1 && _enable_merge_excludedVtxHits){
+          std::cout << "Merging excluded hits near the vertex" << std::endl;
+          //auto hits = cluster.GetHits();
+          //const auto& hit = hits.front();
+          //double w = hit._w;
+          //double t = hit._t;
+          // add a check that the hit is within radius of the vertex, otherwise continue
+          if (gamma_00.second.first == 0) {
+            std::cout << "  no valid gamma_00, skipping singleton merge" << std::endl;
+            continue;
+          }
+          double d00 = ClusterDistance(cluster, gammacluster_00);
+          double max_d00 = _max_merge_dist * gammacluster_00.Length();
+          
+          if (gamma_01.second.first > 0 && gamma_01.second.second != 0.){
+
+            double d01 = ClusterDistance(cluster, gammacluster_01);
+            double max_d01 = _max_merge_dist * gammacluster_01.Length();
+
+            if (d00 <= max_d00 && d00 <= d01){
+              indices_to_merge_00.push_back(clus_idx);
+              continue;
+            }
+            if (d01 <= max_d01 && d01 < d00){
+              indices_to_merge_01.push_back(clus_idx);
+              continue;
+            }
+          }
+          else{
+            if (d00 <= max_d00) {
+              indices_to_merge_00.push_back(clus_idx);
+              continue;
+            }
+          }
+        }
+
+        // skip clusters with less then threshold of hits
 	if (cluster.size() < _min_nhits) continue;
 	
 	// don't merge cluster with itself!

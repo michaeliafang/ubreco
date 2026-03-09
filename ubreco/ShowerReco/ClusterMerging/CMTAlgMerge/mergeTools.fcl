@@ -23,6 +23,8 @@ merge_cbalgovtxalign:
  pair_wise: false
  verbose: false
  run_shower_merge_algo: true
+ proximity_excludeVtxRadius: 3.0
+ enable_merge_excludedVtxHits: true
 }
 
 merge_cbalgopolar:

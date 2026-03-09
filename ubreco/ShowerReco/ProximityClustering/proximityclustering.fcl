@@ -10,7 +10,7 @@ ProximityClustering: {
  BeamDriftTickMin : 780
  BeamDriftTickMax : 5500
  ExcludeVtxHits: true
- ExcludeVtxRadius: 3.0
+ ExcludeVtxRadius: 5.0
 }
 
 END_PROLOG
