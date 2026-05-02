@@ -42,6 +42,7 @@ namespace clusmtool {
   protected:
 
     float ClusterDistance(const ::cluster::Cluster& c1, const ::cluster::Cluster& c2);
+    float ClusterDistance2D(const ::cluster::Cluster& c1, const ::cluster::Cluster& c2);
     std::array<float,3> ComputeClusterPCA(const ::cluster::Cluster& c);
 
     float _max_angle_diff_merge;
@@ -51,7 +52,7 @@ namespace clusmtool {
 
     bool _run_shower_merge_algo;
     // merge hits near the vertex excluded from proximity clustering
-    bool _proximity_excludeVtxRadius;
+    double _proximity_excludeVtxRadius;
     double _enable_merge_excludedVtxHits;
   };
 
@@ -74,11 +75,12 @@ namespace clusmtool {
     _merge_till_converge   = pset.get<bool >("mergetillconverge");
     _verbose               = pset.get<bool> ("verbose",false);
     _run_shower_merge_algo = pset.get<bool> ("run_shower_merge_algo",true);
-    _proximity_excludeVtxRadius    = pset.get<double> ("proximity_excludeVtxRadius");
+    _proximity_excludeVtxRadius    = pset.get<double> ("proximity_excludeVtxRadius", 5);
     _enable_merge_excludedVtxHits = pset.get<bool> ("enable_merge_excludedVtxHits");
 
     std::cout << "DD \t MIN NHITS "  << _min_nhits << std::endl;
     std::cout << "DD \t verbose is " << _verbose   << std::endl;
+    std::cout << pset.to_string() << std::endl;
 
     return;
   }
@@ -198,29 +200,31 @@ namespace clusmtool {
 	// merge hits near the vertex excluded during proximity clustering back into gamma00 and gamma01
         if (cluster.size() == 1 && _enable_merge_excludedVtxHits){
           std::cout << "Merging excluded hits near the vertex" << std::endl;
-          //auto hits = cluster.GetHits();
-          //const auto& hit = hits.front();
-          //double w = hit._w;
-          //double t = hit._t;
-          // add a check that the hit is within radius of the vertex, otherwise continue
+          // check that the hit is within radius of the vertex, otherwise continue
+          if (cluster._start_pt._r > _proximity_excludeVtxRadius){
+          std::cout << "Hit is not inside excluded radius" << std::endl;
+          continue;
+          }
           if (gamma_00.second.first == 0) {
-            std::cout << "  no valid gamma_00, skipping singleton merge" << std::endl;
+            std::cout << "no valid gamma_00, skipping excluded hits near the vertex merge" << std::endl;
             continue;
           }
-          double d00 = ClusterDistance(cluster, gammacluster_00);
-          double max_d00 = _max_merge_dist * gammacluster_00.Length();
+          double d00 = ClusterDistance2D(cluster, gammacluster_00);
+          double max_d00 = 5.0;
           
           if (gamma_01.second.first > 0 && gamma_01.second.second != 0.){
 
-            double d01 = ClusterDistance(cluster, gammacluster_01);
-            double max_d01 = _max_merge_dist * gammacluster_01.Length();
+            double d01 = ClusterDistance2D(cluster, gammacluster_01);
+            double max_d01 = 5.0;
 
             if (d00 <= max_d00 && d00 <= d01){
               indices_to_merge_00.push_back(clus_idx);
+              std::cout << "Excluded hit " << clus_idx << " merging with gamma00" << std::endl;
               continue;
             }
             if (d01 <= max_d01 && d01 < d00){
               indices_to_merge_01.push_back(clus_idx);
+              std::cout << "Excluded hit " << clus_idx << " merging with gamma01" << std::endl;
               continue;
             }
           }
@@ -442,6 +446,27 @@ namespace clusmtool {
     if (c2._start_pt._r > c1._end_pt._r) return c2._start_pt._r - c1._end_pt._r;
 
     return -1;
+  }
+
+  float CBAlgoVtxAlign::ClusterDistance2D(const ::cluster::Cluster& c1, const ::cluster::Cluster& c2)
+  {
+    auto const& hits1 = c1.GetHits();
+    auto const& hits2 = c2.GetHits();
+
+    if (hits1.empty() || hits2.empty()) return 1e9;
+
+    float min_d2 = 1e9;
+
+    for (auto const& h1 : hits1) {
+      for (auto const& h2 : hits2) {
+        float dw = h1._w - h2._w;
+        float dt = h1._t - h2._t;
+        float d2 = dw * dw + dt * dt;
+        if (d2 < min_d2) min_d2 = d2;
+      }
+    }
+
+    return std::sqrt(min_d2);
   }
 
   // compute cluster PCA angle
