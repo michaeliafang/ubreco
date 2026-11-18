@@ -1,5 +1,6 @@
-#include "run_fullshowerreco_overlay_numi_reprocess.fcl"
+# Load recovery prolog definitions before the baseline job's non-prolog settings.
 #include "single_shower_recovery.fcl"
+#include "run_fullshowerreco_overlay_numi_reprocess.fcl"
 
 # Distinguish experimental output products from the baseline reprocessing pass.
 process_name: ShowerReco3DRecovery
