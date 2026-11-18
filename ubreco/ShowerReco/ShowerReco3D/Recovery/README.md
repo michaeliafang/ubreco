@@ -74,7 +74,7 @@ include at least one known merged event.
 
 ## Synthetic-test interpretation
 
-The latest small study uses common-vertex showers with multiple forward-going
+The previous small study (before the tightened cuts below) uses common-vertex showers with multiple forward-going
 branches. Twelve two-shower toys accepted splits; three single-shower controls
 did not. Crossing-branch hit ownership and vertex errors remain limitations.
 These counts do not establish signal efficiency or background purity.
@@ -83,3 +83,16 @@ For future synthetic work, make shower separation and spread increase farther
 from the vertex, while retaining branching in both showers and occasional branches
 pointing into the other shower. The user requested recording this correction
 without another local synthetic run.
+
+## Tightened recovery defaults (2026-11-18)
+
+Each proposed daughter now needs at least 20% of its parent 2D cluster's
+nonnegative integrated hit charge (previously 5%). This is not a hit-count
+fraction or a fraction of all event charge. Vertex support now requires at least
+three hits in the 5–10 cm annulus (previously 5–20 cm). The absolute minimum
+remains ten hits per daughter. The 10 cm upper radius is an initial tuning choice;
+these thresholds need event validation. No final 3D shower-size cut is added.
+
+Release-mode standalone checks cover rejection below 20% charge, acceptance
+above it, and rejection of balanced daughters beginning beyond 10 cm. The earlier
+synthetic-study acceptance rates do not validate these new defaults.

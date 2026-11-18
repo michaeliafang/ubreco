@@ -39,10 +39,10 @@ public:
     cfg_.maxHits = p.get<unsigned int>("MaxHits", 6000);
     cfg_.neighborRadius = p.get<double>("NeighborRadius", 0.8);
     cfg_.innerRadius = p.get<double>("InnerRadius", 5.);
-    cfg_.upstreamRadius = p.get<double>("UpstreamRadius", 20.);
+    cfg_.upstreamRadius = p.get<double>("UpstreamRadius", 10.);
     cfg_.angleStepDegrees = p.get<double>("AngleStepDegrees", 2.);
     cfg_.minOpeningDegrees = p.get<double>("MinOpeningDegrees", 10.);
-    cfg_.minChargeFraction = p.get<double>("MinChargeFraction", 0.05);
+    cfg_.minChargeFraction = p.get<double>("MinChargeFraction", 0.20);
     cfg_.maxCutFraction = p.get<double>("MaxCutFraction", 0.15);
     cfg_.validate();
     maxCandidates_ = p.get<unsigned int>("MaxCandidatesPerPlane", 2);

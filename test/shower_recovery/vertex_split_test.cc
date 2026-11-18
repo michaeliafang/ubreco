@@ -79,5 +79,25 @@ int main() {
   try { auto bad=cfg; bad.neighborRadius=0.; splitAtVertex(hits,bad); }
   catch (const std::invalid_argument&) { threw=true; }
   CHECK(threw);
+  // Equal hit counts, unequal charge: the 20% cut is a charge requirement.
+  std::vector<Hit2D> unequalCharge;
+  ray(unequalCharge,-25.,6.,18.);
+  const auto boundary = unequalCharge.size();
+  ray(unequalCharge,25.,6.,18.);
+  for (std::size_t i=boundary; i<unequalCharge.size(); ++i)
+    unequalCharge[i].charge = 0.19/0.81;
+  CHECK(!splitAtVertex(unequalCharge,cfg).valid());
+  for (std::size_t i=boundary; i<unequalCharge.size(); ++i)
+    unequalCharge[i].charge = 0.21/0.79;
+  CHECK(splitAtVertex(unequalCharge,cfg).valid());
+
+  // A balanced pair starting beyond 10 cm must fail the tightened support cut.
+  std::vector<Hit2D> distant;
+  ray(distant,-25.,12.,25.);
+  ray(distant,25.,12.,25.);
+  CHECK(!splitAtVertex(distant,cfg).valid());
+  auto oldRadius = cfg;
+  oldRadius.upstreamRadius = 20.;
+  CHECK(splitAtVertex(distant,oldRadius).valid());
   std::cout << "Vertex splitter tests passed\n";
 }

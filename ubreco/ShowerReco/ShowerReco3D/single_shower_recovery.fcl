@@ -13,10 +13,10 @@ single_shower_recovery: {
   MaxHits: 6000
   NeighborRadius: 0.8          # cm; Euclidean scoring graph, not proximity RMS overlap
   InnerRadius: 5.0             # cm; ignore vertex-exclusion region for upstream support
-  UpstreamRadius: 20.0         # cm
+  UpstreamRadius: 10.0         # cm
   AngleStepDegrees: 2.0
   MinOpeningDegrees: 10.0      # between upstream mean directions, not the merger's 15 deg
-  MinChargeFraction: 0.05
+  MinChargeFraction: 0.20      # each daughter must carry >=20% of parent cluster charge
   MaxCutFraction: 0.15
   MaxCandidatesPerPlane: 2     # at most 26 cross-plane retry configurations
   MinOriginalHitFraction: 0.8

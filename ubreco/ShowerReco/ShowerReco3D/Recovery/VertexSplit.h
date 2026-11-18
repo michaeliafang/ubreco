@@ -22,10 +22,10 @@ struct SplitConfig {
   std::size_t maxHits = 6000;
   double neighborRadius = 0.8;
   double innerRadius = 5.;
-  double upstreamRadius = 20.;
+  double upstreamRadius = 10.;
   double angleStepDegrees = 2.;
   double minOpeningDegrees = 10.;
-  double minChargeFraction = 0.05;
+  double minChargeFraction = 0.20;
   double maxCutFraction = 0.15;
 
   void validate() const {
