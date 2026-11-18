@@ -20,6 +20,7 @@
 // shower-reco classes and utilities
 #include "ProtoShower/ProtoShowerAlgBase.h"
 #include "Base/ShrRecoManager.h"
+#include "Recovery/SingleShowerRecovery.h"
 // include specific protoshower and recomanager instances
 
 #include "art_root_io/TFileService.h"
@@ -88,6 +89,8 @@ private:
   bool fNeutrinoEvent;
   // fill a ttree?
   bool fFillTree;
+  std::unique_ptr<showerreco::recovery::SingleShowerRecovery> fRecovery;
+  std::vector<double> fRecoveryCalibration;
   
   /// map for backtracking which stores mcshower index to vector of track ids for the mcshower
   std::map<size_t, std::vector<unsigned int> > _MCShowerInfo;  
@@ -141,8 +144,8 @@ private:
  		  const art::PtrMaker<recob::PCAxis> PCAxisPtrMaker,
  		  std::unique_ptr< std::vector<recob::Vertex> >& Vertex_v,
  		  const art::PtrMaker<recob::Vertex> VertexPtrMaker,
-		  const art::ValidHandle<std::vector<recob::PFParticle> > pfp_h,
-		  const art::FindManyP<recob::Cluster> pfp_clus_assn_v,
+		  const std::vector<art::Ptr<recob::PFParticle>>& pfp_ptrs,
+		  const std::vector<std::vector<art::Ptr<recob::Cluster>>>& pfp_clus_assn_v,
 		  const std::vector<std::vector<art::Ptr<recob::Hit> > > pfp_hit_assn_v,
 		  std::unique_ptr< art::Assns <recob::Shower, recob::PFParticle> >& Shower_PFP_assn_v,
 		  std::unique_ptr< art::Assns <recob::Shower, recob::Cluster>    >& Shower_Cluster_assn_v,
@@ -246,6 +249,23 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
 			       adctoe[2] * 0.0000236 / recomb };
 
   _psalg->setCalorimetry(calib);
+  fRecoveryCalibration = calib;
+  const auto recovery = p.get<fhicl::ParameterSet>("SingleShowerRecovery", fhicl::ParameterSet{});
+  if (recovery.get<bool>("Enable", false)) {
+    // Recovery assumes the CM input contract: one selected interaction vertex,
+    // cluster and PFP products from that same selected slice.
+    if (protoshower_pset.get<std::string>("tool_type") != "ProtoShowerCMTool" ||
+        protoshower_pset.get<std::string>("PFPproducer") != fPFPproducer ||
+        protoshower_pset.get<std::string>("ClusterProducer") != fClusproducer ||
+        protoshower_pset.get<std::string>("Vtxproducer") != fVtxproducer)
+      throw std::invalid_argument("SingleShowerRecovery requires consistent ProtoShowerCMTool inputs");
+    fRecovery.reset(new showerreco::recovery::SingleShowerRecovery(recovery));
+    produces<std::vector<recob::Cluster>>("recovery");
+    produces<std::vector<recob::PFParticle>>("recovery");
+    produces<art::Assns<recob::Cluster,recob::Hit>>("recovery");
+    produces<art::Assns<recob::PFParticle,recob::Cluster>>("recovery");
+    produces<art::Assns<recob::PFParticle,recob::Hit>>("recovery");
+  }
 
   SetTTree();
   
@@ -318,13 +338,64 @@ void ShrReco3D::produce(art::Event & e)
   // grab the hits associated to the PFParticles
   auto pfp_hit_assn_v = lar::FindManyInChainP<recob::Hit, recob::Cluster>::find(pfp_h, e, fPFPproducer);
 
+  // Association views can refer either to existing input products or to new
+  // recovery products. SaveShower uses the same publication path for both.
+  std::vector<art::Ptr<recob::PFParticle>> pfp_ptrs;
+  std::vector<std::vector<art::Ptr<recob::Cluster>>> cluster_ptrs;
+  for (size_t i = 0; i < pfp_h->size(); ++i) {
+    pfp_ptrs.emplace_back(pfp_h, i);
+    cluster_ptrs.push_back(pfp_clus_assn_v.at(i));
+  }
+  auto recoveryClusters = std::make_unique<std::vector<recob::Cluster>>();
+  auto recoveryPFPs = std::make_unique<std::vector<recob::PFParticle>>();
+  auto recoveryClusterHits = std::make_unique<art::Assns<recob::Cluster,recob::Hit>>();
+  auto recoveryPFPClusters = std::make_unique<art::Assns<recob::PFParticle,recob::Cluster>>();
+  auto recoveryPFPHits = std::make_unique<art::Assns<recob::PFParticle,recob::Hit>>();
+  const auto usable = [](const showerreco::Shower_t& s) {
+    return showerreco::recovery::usableShower(s);
+  };
+  if (fRecovery && std::count_if(output_shower_v.begin(), output_shower_v.end(), usable) == 1) {
+    const auto baseline = std::find_if(output_shower_v.begin(), output_shower_v.end(), usable);
+    auto recovered = fRecovery->run(e, fClusproducer, fVtxproducer,
+      pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser);
+    // Never replace a usable baseline by zero, one, or more than two showers.
+    if (recovered.showers.size() == 2) {
+      art::PtrMaker<recob::Cluster> makeCluster(e, "recovery");
+      art::PtrMaker<recob::PFParticle> makePFP(e, "recovery");
+      *recoveryClusters = std::move(recovered.clusters);
+      for (size_t ci = 0; ci < recovered.clusterHits.size(); ++ci)
+        for (const auto& hit : recovered.clusterHits[ci])
+          recoveryClusterHits->addSingle(makeCluster(ci), hit);
+      pfp_ptrs.clear();
+      cluster_ptrs.clear();
+      pfp_hit_assn_v.clear();
+      for (size_t i = 0; i < recovered.matches.size(); ++i) {
+        recoveryPFPs->emplace_back(11, i, recob::PFParticle::kPFParticlePrimary, std::vector<size_t>{});
+        pfp_ptrs.push_back(makePFP(i));
+        cluster_ptrs.emplace_back();
+        pfp_hit_assn_v.emplace_back();
+        for (auto ci : recovered.matches[i]) {
+          cluster_ptrs.back().push_back(makeCluster(ci));
+          recoveryPFPClusters->addSingle(makePFP(i),makeCluster(ci));
+          for (const auto& hit : recovered.clusterHits[ci]) {
+            pfp_hit_assn_v.back().push_back(hit);
+            recoveryPFPHits->addSingle(makePFP(i),hit);
+          }
+        }
+      }
+      output_shower_v = std::move(recovered.showers);
+      mf::LogInfo("SingleShowerRecovery") << "Recovered two showers in event " << e.id();
+    }
+    else mf::LogInfo("SingleShowerRecovery") << "Retaining single shower in event " << e.id();
+  }
+
   // save output showers
   for (size_t s=0; s < output_shower_v.size(); s++) {
     try {
       SaveShower(detClocks, detProperties,
                  e, s, output_shower_v.at(s), Shower_v, ShowerPtrMaker,
 		 SpacePoint_v, SpacePointPtrMaker, PCAxis_v, PCAxisPtrMaker, Vertex_v, VertexPtrMaker,
-		 pfp_h, pfp_clus_assn_v, pfp_hit_assn_v,
+		 pfp_ptrs, cluster_ptrs, pfp_hit_assn_v,
 		 Shower_PFP_assn_v, Shower_Cluster_assn_v, Shower_Hit_assn_v,
 		 Shower_Sps_assn_v, Shower_PCAxis_assn_v, Shower_Vertex_assn_v, Sps_Hit_assn_v);
     }
@@ -333,6 +404,13 @@ void ShrReco3D::produce(art::Event & e)
     }
   }// for all output reconstructed showers
   
+  if (fRecovery) {
+    e.put(std::move(recoveryClusters), "recovery");
+    e.put(std::move(recoveryPFPs), "recovery");
+    e.put(std::move(recoveryClusterHits), "recovery");
+    e.put(std::move(recoveryPFPClusters), "recovery");
+    e.put(std::move(recoveryPFPHits), "recovery");
+  }
   e.put(std::move(Shower_v));
   e.put(std::move(SpacePoint_v));
   e.put(std::move(PCAxis_v));
@@ -371,8 +449,8 @@ void ShrReco3D::SaveShower(detinfo::DetectorClocksData const& detClocks,
                            const art::PtrMaker<recob::PCAxis> PCAxisPtrMaker,
                            std::unique_ptr< std::vector<recob::Vertex> >& Vertex_v,
                            const art::PtrMaker<recob::Vertex> VertexPtrMaker,
-			   const art::ValidHandle<std::vector<recob::PFParticle> > pfp_h,
-			   const art::FindManyP<recob::Cluster> pfp_clus_assn_v,
+			   const std::vector<art::Ptr<recob::PFParticle>>& pfp_ptrs,
+			   const std::vector<std::vector<art::Ptr<recob::Cluster>>>& pfp_clus_assn_v,
 			   const std::vector<std::vector<art::Ptr<recob::Hit> > > pfp_hit_assn_v,
 			   std::unique_ptr< art::Assns <recob::Shower, recob::PFParticle> >& Shower_PFP_assn_v,
 			   std::unique_ptr< art::Assns <recob::Shower, recob::Cluster> >& Shower_Cluster_assn_v,
@@ -403,7 +481,7 @@ void ShrReco3D::SaveShower(detinfo::DetectorClocksData const& detClocks,
   }
 
   // make sure associations exist for PFP, clusters, and hits
-  if (pfp_h->size() <= shower.fIndex) {
+  if (pfp_ptrs.size() <= shower.fIndex) {
     std::stringstream ss;
     ss << "Shower " << idx << " does not have PFP associated to index " << shower.fIndex;
     throw showerreco::ShowerRecoException(ss.str());
@@ -454,7 +532,7 @@ void ShrReco3D::SaveShower(detinfo::DetectorClocksData const& detClocks,
   // now take care of associations
   
   // step 1 : pfp
-  const art::Ptr<recob::PFParticle> PFPPtr(pfp_h, shower.fIndex);
+  const art::Ptr<recob::PFParticle> PFPPtr = pfp_ptrs.at(shower.fIndex);
   Shower_PFP_assn_v->addSingle( ShrPtr, PFPPtr );
 
   // step 2 : clusters

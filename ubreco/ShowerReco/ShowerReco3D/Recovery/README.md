@@ -1,0 +1,85 @@
+# Experimental single-shower recovery
+
+## Status (2026-11-17)
+
+The C++ splitter has passed standalone tests, including branching two-shower
+patterns. The art integration has been reviewed against this repository's
+ClusterMaker, matcher, ProtoShowerCMTool, and shower publication code.
+It has **not been compiled or run inside LArSoft**: the local environment has no
+available art/LArSoft installation or `lar` executable. Framework compatibility,
+FCL resolution, event associations, and full reconstruction still require a GPVM
+build and event run. Standalone success is not framework validation.
+
+## Integration
+
+This is an optional retry inside the existing `ShrReco3D` producer, not a separate
+art module. `VertexSplit.h` is the detector-independent algorithm;
+`SingleShowerRecovery.h` adapts hits and clusters to the existing matcher and
+shower reconstruction manager. The CMake files install the headers and FCL and
+link the producer against the cluster-matching library.
+
+Recovery is disabled unless `SingleShowerRecovery.Enable` is true. It runs only
+after the normal pass produces exactly one usable shower and requires one input
+vertex. It considers clusters in all three planes, including unmatched clusters,
+and retries the existing cross-plane matching and shower reconstruction. It
+accepts exactly two usable showers, requires the configured original-hit retention,
+and requires a selected split to contribute to both showers. Otherwise the normal
+result is retained. Events with zero or at least two usable showers are untouched.
+The existing collection-plane requirement remains in force.
+
+Accepted recovery clusters, PFParticles, and their hit/cluster associations use
+the `showerreco3d:recovery` instance. Reconstructed showers retain the usual
+`showerreco3d` label. The accompanying `NuSliceReBuilderProducer` change handles
+the recovered cluster-hit product by ProductID; it must be built and deployed too.
+Recovery products are empty when recovery is enabled but not accepted.
+
+## GPVM check
+
+Copy all modified and new files, including the untracked Recovery directory,
+test directory, and FCL files. Build and set up this checkout with the normal
+MicroBooNE development workflow for this release; a standalone Conda compiler
+cannot build the art integration. Both `ShrReco3D` and
+`NuSliceReBuilderProducer` must compile successfully before running events.
+
+The separate job FCL is
+`run_fullshowerreco_overlay_numi_reprocess_recovery.fcl`. It includes the existing
+NuMI overlay reprocessing job, enables the recovery table, and copies the
+baseline match and priority tool settings. Its process name is
+`ShowerReco3DRecovery`. `single_shower_recovery.fcl` holds the algorithm settings;
+it is not a complete job on its own.
+
+After building and setting up the modified release, run on the same original
+input used for the baseline reprocessing job (replace `input.root`):
+
+```bash
+lar -c run_fullshowerreco_overlay_numi_reprocess_recovery.fcl -s input.root -n 10 -o recovery.root
+```
+
+Use a separate working directory for the baseline comparison to keep histogram
+outputs separate:
+
+```bash
+lar -c run_fullshowerreco_overlay_numi_reprocess.fcl -s input.root -n 10 -o baseline.root
+```
+
+Do not feed the newly recovered output back into this same recovery process.
+The input must contain the products required by the original reprocessing job.
+Check that both jobs finish without exceptions, then compare identical event IDs:
+events with two baseline showers must remain unchanged, unsuccessful recovery
+must preserve the single shower, and successful recovery must publish two showers
+with valid cluster-hit associations through the rebuilt Pandora output. The
+`SingleShowerRecovery` log reports accepted recovery or baseline retention. A
+small sample without a recovery acceptance does not validate the accepted path;
+include at least one known merged event.
+
+## Synthetic-test interpretation
+
+The latest small study uses common-vertex showers with multiple forward-going
+branches. Twelve two-shower toys accepted splits; three single-shower controls
+did not. Crossing-branch hit ownership and vertex errors remain limitations.
+These counts do not establish signal efficiency or background purity.
+
+For future synthetic work, make shower separation and spread increase farther
+from the vertex, while retaining branching in both showers and occasional branches
+pointing into the other shower. The user requested recording this correction
+without another local synthetic run.

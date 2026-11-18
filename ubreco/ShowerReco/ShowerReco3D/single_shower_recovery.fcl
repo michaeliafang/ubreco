@@ -1,0 +1,24 @@
+#include "matchTools.fcl"
+#include "priorityTools.fcl"
+
+BEGIN_PROLOG
+# Experimental settings: require validation on signal and neutrino/EXT samples.
+# This table is inert until assigned to showerreco3d.SingleShowerRecovery.
+single_shower_recovery: {
+  Enable: true
+  MatchTool: @local::match_cfalgoiou
+  PriorityTool: @local::priority_cpalgonhits
+  MinHits: 10
+  MinUpstreamHits: 3
+  MaxHits: 6000
+  NeighborRadius: 0.8          # cm; Euclidean scoring graph, not proximity RMS overlap
+  InnerRadius: 5.0             # cm; ignore vertex-exclusion region for upstream support
+  UpstreamRadius: 20.0         # cm
+  AngleStepDegrees: 2.0
+  MinOpeningDegrees: 10.0      # between upstream mean directions, not the merger's 15 deg
+  MinChargeFraction: 0.05
+  MaxCutFraction: 0.15
+  MaxCandidatesPerPlane: 2     # at most 26 cross-plane retry configurations
+  MinOriginalHitFraction: 0.8
+}
+END_PROLOG

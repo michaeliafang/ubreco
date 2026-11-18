@@ -15,6 +15,7 @@ cet_build_plugin(
   LIBRARIES
   PRIVATE
   ubreco::ShowerReco_ShowerReco3D_Base
+  ubreco::ShowerReco_ClusterMerging_CMToolBase
   larevt::SpaceChargeService
   lardata::Utilities
   lardata::DetectorClocksService
@@ -27,6 +28,7 @@ cet_build_plugin(
   Eigen3::Eigen
 )
 
+add_subdirectory(Recovery)
 add_subdirectory(ProtoShower)
 add_subdirectory(Base)
 add_subdirectory(ModularAlgo)

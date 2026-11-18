@@ -1,0 +1,10 @@
+#include "run_fullshowerreco_overlay_numi_reprocess.fcl"
+#include "single_shower_recovery.fcl"
+
+# Distinguish experimental output products from the baseline reprocessing pass.
+process_name: ShowerReco3DRecovery
+
+physics.producers.showerreco3d.SingleShowerRecovery: @local::single_shower_recovery
+# Reuse the exact matcher configuration used by the baseline pass.
+physics.producers.showerreco3d.SingleShowerRecovery.MatchTool: @local::physics.producers.cmatcher.MatchTool
+physics.producers.showerreco3d.SingleShowerRecovery.PriorityTool: @local::physics.producers.cmatcher.PriorityTool

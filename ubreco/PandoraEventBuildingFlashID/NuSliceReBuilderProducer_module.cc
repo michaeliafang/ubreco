@@ -1,3 +1,4 @@
+#include <stdexcept>
 ////////////////////////////////////////////////////////////////////////
 // Class:       NuSliceReBuilderProducer
 // Plugin Type: producer (art v3_06_03)
@@ -175,6 +176,13 @@ void NuSliceReBuilderProducer::produce(art::Event& e)
   //
   auto assocSpsHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowerSpacePoints, e, "showerreco3d"));
   auto assocCluHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowerClusters, e, "cmerger"));
+
+  art::Handle<std::vector<recob::Cluster>> recoveredClusters;
+  e.getByLabel(art::InputTag("showerreco3d", "recovery"), recoveredClusters);
+  std::unique_ptr<art::FindManyP<recob::Hit>> recoveredClusterHits;
+  if (recoveredClusters.isValid())
+    recoveredClusterHits.reset(new art::FindManyP<recob::Hit>(
+      recoveredClusters, e, art::InputTag("showerreco3d", "recovery")));
 
   std::cout << "input sizes=" << inputPndrPFParticle->size() << " " << inputPndrPFPTrkAssns->size() << std::endl;
 
@@ -361,7 +369,11 @@ void NuSliceReBuilderProducer::produce(art::Event& e)
       outputCluster->push_back(*clu);
       auto clu_ptr = cluPtrMaker(outputCluster->size()-1);
       outPFPCluAssns->addSingle(pfp_ptr,clu_ptr);
-      auto hits = assocCluHit->at(clu.key());
+      std::vector<art::Ptr<recob::Hit>> hits;
+      if (clu.id() == inputShowerClusters.id()) hits = assocCluHit->at(clu.key());
+      else if (recoveredClusters.isValid() && clu.id() == recoveredClusters.id())
+        hits = recoveredClusterHits->at(clu.key());
+      else throw std::runtime_error("NuSliceReBuilderProducer: unknown shower cluster product");
       for (auto h : hits) {
 	auto it = std::find_if(hmap.begin(), hmap.end(),
 			       [&h](hitprops hp){
