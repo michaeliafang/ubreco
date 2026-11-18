@@ -111,7 +111,7 @@ physics.producers.cmerger.VertexProducer: "neutrinovertex"
 
 physics.producers.cmatcher.VertexProducer: "neutrinovertex"
 
-physics.producers.showerreco3d.VtxProducer: "neutrinovertex"
+physics.producers.showerreco3d.Vtxproducer: "neutrinovertex"
 
 physics.producers.showerreco3d.ProtoShowerTool:
 {
