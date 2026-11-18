@@ -4,13 +4,13 @@
 #include "run_fullshowerreco_overlay_numi_reprocess.fcl"
 
 process_name: ShowerSpacePointInputs
-physics.producers.splitspacepoints: @local::standard_spacepointsolver
-physics.producers.splitspacepoints.HitLabel: "nugraphshowerhits"
-physics.producers.splitspacepoints.Fit: true
+physics.producers.spacepointsolver: @local::standard_spacepointsolver
+physics.producers.spacepointsolver.HitLabel: "nugraphshowerhits"
+physics.producers.spacepointsolver.Fit: true
 
 # Save the exact selected hit collection used by the solver and the vertex.
 # Do not run showerreco or rebuild Pandora in this preprocessing pass.
-physics.reco: [ nugraphshowerhits, neutrinovertex, splitspacepoints ]
+physics.reco: [ nugraphshowerhits, neutrinovertex, spacepointsolver ]
 outputs.out1.fileName: "shower_spacepoints.root"
 outputs.out1.outputCommands: [ "keep *_*_*_*" ]
 services.TFileService.fileName: "shower_spacepoints_hist.root"

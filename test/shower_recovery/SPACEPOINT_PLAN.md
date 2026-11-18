@@ -1,6 +1,7 @@
 # SpacePointSolver feasibility and preprocessing
 
-The repository currently has no SpacePointSolver configuration or consumer.
+Before this change, ubreco had no SpacePointSolver job or consumer.
+The new preprocessing job is a wrapper; it does not supply the solver itself.
 The upstream larreco interface accepts HitLabel, builds spacepoints, and with
 Fit enabled writes SpacePoint–Hit associations and charged spacepoint products.
 Its standard FCL is SpacePointSolver.fcl / standard_spacepointsolver. These
@@ -14,7 +15,7 @@ Sources:
 
 The experimental job run_spacepointsolver_shower_inputs_overlay_numi.fcl reuses
 this repo's services and hit selection and schedules only nugraphshowerhits,
-neutrinovertex, and splitspacepoints. It does not run the splitter or rebuild
+neutrinovertex, and spacepointsolver. It does not run the splitter or rebuild
 Pandora. Use the same original input as the ordinary reprocessing job.
 
 After installing the FCL on GPVM, run in a separate output directory:
@@ -23,7 +24,7 @@ After installing the FCL on GPVM, run in a separate output directory:
 lar -c run_spacepointsolver_shower_inputs_overlay_numi.fcl -s input.root -n 10 -o shower_spacepoints.root
 ```
 
-Inspect splitspacepoints (default instance, fitted result), including hit
+Inspect spacepointsolver (default instance, fitted result), including hit
 associations and density near the vertex in the known merged events. The
 pre/noreg instances are different diagnostic outputs, not interchangeable with
 the fitted result's hit associations. Record TimeTracker timing and compare to
@@ -35,10 +36,10 @@ mapping. Therefore solver hits from gaushit cannot simply be compared by art::Pt
 to cmerger hits from nugraphshowerhits. The preprocessing job solves directly on
 nugraphshowerhits and retains all products. A future second-stage job must REMOVE
 nugraphshowerhits and neutrinovertex from its schedule, reuse those stored
-products, and retain splitspacepoints and its associations. Recreating selected
+products, and retain spacepointsolver and its associations. Recreating selected
 hits in a later process would break direct product identity even if values match.
 
-No existing recovery code reads splitspacepoints yet. Running the normal recovery
+No existing recovery code reads spacepointsolver yet. Running the normal recovery
 job on the preprocessing file would not add 3D information to the splitter.
 Implement an explicit optional consumer only after validating the point cloud.
 Use its SpacePoint–Hit links to restrict seeds to the baseline shower and connect
@@ -53,3 +54,18 @@ structure sought. The selected-hit input also cannot recover hits excluded by
 the upstream hit selector; a full-hit solver plus a reliable mapping is a later
 option if needed. Existing ShrReco3D SpacePointAlg runs after reconstruction on
 already assigned shower hits; it is not this independent precomputed evidence.
+
+## Configuration provenance
+
+`SpacePointSolver.fcl` and its `standard_spacepointsolver` table come from the
+external LArSoft `larreco` package, under `larreco/SpacePointSolver/` in upstream
+source. The standard FCL also includes `spacepointsolverhitreadingtools.fcl`.
+Neither external FCL was copied into ubreco. The new ubreco job includes the
+installed `SpacePointSolver.fcl` via FHICL_FILE_PATH and overrides only HitLabel
+and Fit for this study. The module output label is `spacepointsolver`; these
+points are a separate reusable product, not split-shower output.
+
+The interface was inspected through SBN's generated source documentation linked
+above. This is evidence for the upstream interface, not proof that the exact
+GPVM installation has that file or identical tool defaults. Verify the installed
+larreco configuration and experiment-specific hit-reader settings before running.
