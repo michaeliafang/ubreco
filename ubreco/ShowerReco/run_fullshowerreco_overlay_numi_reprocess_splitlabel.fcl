@@ -1,0 +1,10 @@
+# Gallery label diagnostic: run the same recovery under a unique module label.
+#include "run_fullshowerreco_overlay_numi_reprocess_recovery.fcl"
+
+process_name: ShowerSplitLabelTest
+
+physics.producers.showersplittest: @local::physics.producers.showerreco3d
+physics.producers.showerreco3d: @erase
+physics.producers.pandora.ShowerProducer: "showersplittest"
+
+physics.reco: [ pandoraTrack, nugraphshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]

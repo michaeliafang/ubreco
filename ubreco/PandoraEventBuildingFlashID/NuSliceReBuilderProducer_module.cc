@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <string>
 ////////////////////////////////////////////////////////////////////////
 // Class:       NuSliceReBuilderProducer
 // Plugin Type: producer (art v3_06_03)
@@ -54,6 +55,7 @@ public:
   void produce(art::Event& e) override;
 
 private:
+  std::string fShowerProducer;
   // Declare member data here.
   // std::string fPfpLabel;
   // std::string fSliceLabel;
@@ -63,6 +65,7 @@ private:
 
 NuSliceReBuilderProducer::NuSliceReBuilderProducer(fhicl::ParameterSet const& p)
   : EDProducer{p}
+  , fShowerProducer(p.get<std::string>("ShowerProducer", "showerreco3d"))
   // , fPfpLabel(p.get<std::string>("PfpLabel", "pandora"))
   // , fSliceLabel(p.get<std::string>("SliceLabel", "pandora"))
   // , fHitLabel(p.get<std::string>("HitLabel", "gaushit"))
@@ -163,26 +166,26 @@ void NuSliceReBuilderProducer::produce(art::Event& e)
   art::ValidHandle<std::vector<recob::PFParticle>> removedPFParticle = e.getValidHandle<std::vector<recob::PFParticle>>("nugraphshowerhits");
 
   // shower pfps from NG2 that needs to be added
-  art::ValidHandle<std::vector<recob::Shower>> inputShowers = e.getValidHandle<std::vector<recob::Shower>>("showerreco3d");
-  art::ValidHandle<std::vector<recob::SpacePoint>> inputShowerSpacePoints = e.getValidHandle<std::vector<recob::SpacePoint>>("showerreco3d");
+  art::ValidHandle<std::vector<recob::Shower>> inputShowers = e.getValidHandle<std::vector<recob::Shower>>(fShowerProducer);
+  art::ValidHandle<std::vector<recob::SpacePoint>> inputShowerSpacePoints = e.getValidHandle<std::vector<recob::SpacePoint>>(fShowerProducer);
   art::ValidHandle<std::vector<recob::Cluster>> inputShowerClusters = e.getValidHandle<std::vector<recob::Cluster>>("cmerger");
   //
-  auto assocShrPfp = std::unique_ptr<art::FindOneP<recob::PFParticle>>(new art::FindOneP<recob::PFParticle>(inputShowers, e, "showerreco3d"));
-  auto assocShrClu = std::unique_ptr<art::FindManyP<recob::Cluster>>(new art::FindManyP<recob::Cluster>(inputShowers, e, "showerreco3d"));
-  auto assocShrSps = std::unique_ptr<art::FindManyP<recob::SpacePoint>>(new art::FindManyP<recob::SpacePoint>(inputShowers, e, "showerreco3d"));
-  auto assocShrPca = std::unique_ptr<art::FindOneP<recob::PCAxis>>(new art::FindOneP<recob::PCAxis>(inputShowers, e, "showerreco3d"));
-  auto assocShrHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowers, e, "showerreco3d"));
-  auto assocShrVtx = std::unique_ptr<art::FindOneP<recob::Vertex>>(new art::FindOneP<recob::Vertex>(inputShowers, e, "showerreco3d"));
+  auto assocShrPfp = std::unique_ptr<art::FindOneP<recob::PFParticle>>(new art::FindOneP<recob::PFParticle>(inputShowers, e, fShowerProducer));
+  auto assocShrClu = std::unique_ptr<art::FindManyP<recob::Cluster>>(new art::FindManyP<recob::Cluster>(inputShowers, e, fShowerProducer));
+  auto assocShrSps = std::unique_ptr<art::FindManyP<recob::SpacePoint>>(new art::FindManyP<recob::SpacePoint>(inputShowers, e, fShowerProducer));
+  auto assocShrPca = std::unique_ptr<art::FindOneP<recob::PCAxis>>(new art::FindOneP<recob::PCAxis>(inputShowers, e, fShowerProducer));
+  auto assocShrHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowers, e, fShowerProducer));
+  auto assocShrVtx = std::unique_ptr<art::FindOneP<recob::Vertex>>(new art::FindOneP<recob::Vertex>(inputShowers, e, fShowerProducer));
   //
-  auto assocSpsHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowerSpacePoints, e, "showerreco3d"));
+  auto assocSpsHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowerSpacePoints, e, fShowerProducer));
   auto assocCluHit = std::unique_ptr<art::FindManyP<recob::Hit>>(new art::FindManyP<recob::Hit>(inputShowerClusters, e, "cmerger"));
 
   art::Handle<std::vector<recob::Cluster>> recoveredClusters;
-  e.getByLabel(art::InputTag("showerreco3d", "recovery"), recoveredClusters);
+  e.getByLabel(art::InputTag(fShowerProducer, "recovery"), recoveredClusters);
   std::unique_ptr<art::FindManyP<recob::Hit>> recoveredClusterHits;
   if (recoveredClusters.isValid())
     recoveredClusterHits.reset(new art::FindManyP<recob::Hit>(
-      recoveredClusters, e, art::InputTag("showerreco3d", "recovery")));
+      recoveredClusters, e, art::InputTag(fShowerProducer, "recovery")));
 
   std::cout << "input sizes=" << inputPndrPFParticle->size() << " " << inputPndrPFPTrkAssns->size() << std::endl;
 

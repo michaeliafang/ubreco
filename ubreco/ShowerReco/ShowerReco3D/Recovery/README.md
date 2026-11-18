@@ -96,3 +96,28 @@ these thresholds need event validation. No final 3D shower-size cut is added.
 Release-mode standalone checks cover rejection below 20% charge, acceptance
 above it, and rejection of balanced daughters beginning beyond 10 cm. The earlier
 synthetic-study acceptance rates do not validate these new defaults.
+
+## Gallery product-label diagnostic
+
+Use `run_fullshowerreco_overlay_numi_reprocess_splitlabel.fcl` to run the same
+recovery configuration under module label `showersplittest`, with process
+`ShowerSplitLabelTest`. This is a separate job option; the regular recovery FCL
+continues to produce `showerreco3d`. The diagnostic replaces the producer in the
+scheduled path, and configures the downstream rebuilder's `ShowerProducer`
+parameter to read both showers and their associations from `showersplittest`.
+That parameter defaults to `showerreco3d` for all existing jobs.
+
+After rebuilding/installing, run in a separate output directory:
+
+```bash
+lar -c run_fullshowerreco_overlay_numi_reprocess_splitlabel.fcl -s input.root -n 10 -o splitlabel.root
+```
+
+Select `showersplittest` as the shower product in gallery. Its appearance tests
+product selection, not whether a split was accepted: it contains the final
+showers even when recovery is skipped or rejected. Recovered clusters and
+PFParticles use `showersplittest:recovery`. The rebuilt interaction also remains
+available as `pandora`. Existing shower products retained from input may still
+appear in the display. Return to the regular recovery FCL to use the standard
+`showerreco3d` output label again. Local source checks do not replace a GPVM build
+and FCL/event validation of this diagnostic.
