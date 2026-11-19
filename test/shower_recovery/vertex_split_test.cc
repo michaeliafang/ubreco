@@ -32,9 +32,9 @@ void partition(const Split& split, std::size_t n) {
 int main() {
   SplitConfig cfg;
   std::vector<Hit2D> hits;
-  ray(hits,-20.,6.,35.);
+  ray(hits,-20.,1.,35.);
   const std::size_t first = hits.size();
-  ray(hits,20.,6.,22.); // Unequal shower sizes are intentional.
+  ray(hits,20.,1.,22.); // Unequal shower sizes are intentional.
   const std::size_t secondEnd = hits.size();
   // A narrow bridge between the rays, away from the vertex.
   const double x = 15.*std::cos(20.*pi/180.);
@@ -81,9 +81,9 @@ int main() {
   CHECK(threw);
   // Equal hit counts, unequal charge: the 20% cut is a charge requirement.
   std::vector<Hit2D> unequalCharge;
-  ray(unequalCharge,-25.,6.,18.);
+  ray(unequalCharge,-25.,1.,18.);
   const auto boundary = unequalCharge.size();
-  ray(unequalCharge,25.,6.,18.);
+  ray(unequalCharge,25.,1.,18.);
   for (std::size_t i=boundary; i<unequalCharge.size(); ++i)
     unequalCharge[i].charge = 0.19/0.81;
   CHECK(!splitAtVertex(unequalCharge,cfg).valid());
@@ -98,6 +98,55 @@ int main() {
   CHECK(!splitAtVertex(distant,cfg).valid());
   auto oldRadius = cfg;
   oldRadius.upstreamRadius = 20.;
+  oldRadius.maxStartRadius = 15.;
   CHECK(splitAtVertex(distant,oldRadius).valid());
+  // A valid pair touching at the vertex must not fail because of local edges.
+  std::vector<Hit2D> touching;
+  ray(touching,-12.,0.,30.);
+  ray(touching,12.,0.,30.);
+  SplitDiagnostics diagnostic;
+  partition(splitAtVertex(touching,cfg,&diagnostic),touching.size());
+  CHECK(diagnostic.trackPairs > 0);
+
+  // Starts just beyond 5 cm are rejected even though they extend through 10 cm.
+  std::vector<Hit2D> late;
+  ray(late,-20.,5.2,25.);
+  ray(late,20.,5.2,25.);
+  CHECK(!splitAtVertex(late,cfg).valid());
+  auto relaxedStart = cfg;
+  relaxedStart.maxStartRadius = 7.;
+  CHECK(splitAtVertex(late,relaxedStart).valid());
+
+  // Three near-vertex hits plus distant rays are not two sustained starts.
+  std::vector<Hit2D> fragments;
+  for (double angle : {-20.,20.}) {
+    ray(fragments,angle,1.,1.8);
+    ray(fragments,angle,7.,30.);
+  }
+  CHECK(!splitAtVertex(fragments,cfg).valid());
+
+  // Modest transverse jitter and short local gaps retain track evidence.
+  auto irregular = touching;
+  for (auto& h : irregular) h.t += 0.06*std::sin(7.*h.w);
+  irregular.erase(std::remove_if(irregular.begin(),irregular.end(),[](const auto& h) {
+    const double r = std::hypot(h.w,h.t);
+    return r > 6. && r < 6.7;
+  }),irregular.end());
+  partition(splitAtVertex(irregular,cfg),irregular.size());
+
+  // A modest vertex displacement need not force both fits through the origin.
+  auto shifted = touching;
+  for (auto& h : shifted) h.t -= 2.;
+  partition(splitAtVertex(shifted,cfg),shifted.size());
+
+  // Dense inputs have a bounded graph allocation and an explicit rejection.
+  auto bounded = cfg;
+  bounded.maxEdges = 1;
+  CHECK(!splitAtVertex(touching,bounded,&diagnostic).valid());
+  CHECK(diagnostic.edgeLimit);
+  threw = false;
+  try { auto bad=cfg; bad.maxStartRadius=11.; splitAtVertex(touching,bad); }
+  catch (const std::invalid_argument&) { threw=true; }
+  CHECK(threw);
   std::cout << "Vertex splitter tests passed\n";
 }

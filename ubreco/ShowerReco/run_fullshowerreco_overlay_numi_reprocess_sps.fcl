@@ -1,0 +1,16 @@
+# Reuse existing NuGraph spacepoints; do not run SpacePointSolver again.
+#include "run_fullshowerreco_overlay_numi_reprocess_splitlabel.fcl"
+
+process_name: ShowerSplitExistingSPS
+physics.producers.spsshowerhits: {
+  module_type: "ExistingSpacePointHitMapper"
+  SpacePointProducer: "sps::OverlayRecoStage2n"
+  SourceHitProducer: "nuslhits::OverlayRecoStage2n"
+  SelectedHitProducer: "nugraphshowerhits"
+}
+physics.producers.showersplittest.SingleShowerRecovery.UseSpacePoints: true
+physics.producers.showersplittest.SingleShowerRecovery.SpacePointProducer: "sps::OverlayRecoStage2n"
+physics.producers.showersplittest.SingleShowerRecovery.SpacePointHitProducer: "spsshowerhits"
+physics.producers.showersplittest.SingleShowerRecovery.MinSpacePointWeight: 6.0
+physics.producers.showersplittest.SingleShowerRecovery.MaxSpacePointConflict: 0.25
+physics.reco: [ pandoraTrack, nugraphshowerhits, spsshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]

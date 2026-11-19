@@ -55,6 +55,7 @@
 #include "Base/ShowerRecoException.h"
 
 #include <memory>
+#include <chrono>
 
 class ShrReco3D;
 
@@ -309,7 +310,14 @@ void ShrReco3D::produce(art::Event & e)
                                      art::ServiceHandle<geo::WireReadout const>()->Get(),
                                      detClocks,
                                      detProperties};
+  const auto baselineStart = std::chrono::steady_clock::now();
   _manager->Reconstruct(gser, output_shower_v);
+  if (fRecovery)
+    mf::LogInfo("SingleShowerRecovery") << "event " << e.id()
+      << " baseline_reco_ms=" << std::chrono::duration<double,std::milli>(
+           std::chrono::steady_clock::now()-baselineStart).count()
+      << " baseline_usable=" << std::count_if(output_shower_v.begin(),output_shower_v.end(),
+           showerreco::recovery::usableShower);
 
   // if using truth, backtrack and load mcshowers
   if (fBacktrackTag != ""){

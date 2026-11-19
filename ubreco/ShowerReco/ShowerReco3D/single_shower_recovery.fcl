@@ -9,16 +9,25 @@ single_shower_recovery: {
   MatchTool: @local::match_cfalgoiou
   PriorityTool: @local::priority_cpalgonhits
   MinHits: 10
-  MinUpstreamHits: 3
+  MinUpstreamHits: 6
   MaxHits: 6000
   NeighborRadius: 0.8          # cm; Euclidean scoring graph, not proximity RMS overlap
-  InnerRadius: 5.0             # cm; ignore vertex-exclusion region for upstream support
+  InnerRadius: 0.0             # include near-vertex hits in trajectory evidence
   UpstreamRadius: 10.0         # cm
+  MaxStartRadius: 5.0         # cm; at least MinStartHits on each sustained start
+  MinStartHits: 3
+  MinTrackSpan: 3.0           # cm along each early trajectory
+  MaxTrackGap: 1.5            # cm; maximum gap along a supported run
+  TrackWidth: 0.6             # cm; perpendicular distance from fitted ray
+  MinTrackFraction: 0.6       # fraction of daughter's early hits in sustained run
+  MaxEdges: 200000            # reject excessively dense candidates
+  MaxMatchTrials: 4           # maximum cross-plane matching retries per event
+  MaxRecoShowers: 4           # total additional proto-showers reconstructed per event
   AngleStepDegrees: 2.0
   MinOpeningDegrees: 10.0      # between upstream mean directions, not the merger's 15 deg
   MinChargeFraction: 0.20      # each daughter must carry >=20% of parent cluster charge
   MaxCutFraction: 0.15
-  MaxCandidatesPerPlane: 2     # at most 26 cross-plane retry configurations
+  MaxCandidatesPerPlane: 2     # up to 26 candidates, bounded by MaxMatchTrials
   MinOriginalHitFraction: 0.8
 }
 END_PROLOG
