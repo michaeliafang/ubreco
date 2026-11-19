@@ -20,7 +20,7 @@ showerreco::recovery::HitFingerprint fingerprint(const recob::Hit& h) {
   return {{double(h.Channel()),double(w.Cryostat),double(w.TPC),double(w.Plane),double(w.Wire),
     double(h.View()),double(h.SignalType()),double(h.StartTick()),double(h.EndTick()),
     h.PeakTime(),h.SigmaPeakTime(),h.RMS(),h.PeakAmplitude(),h.SigmaPeakAmplitude(),
-    h.Integral(),h.SigmaIntegral(),h.SummedADC(),double(h.Multiplicity()),
+    h.Integral(),h.SigmaIntegral(),h.ROISummedADC(),double(h.Multiplicity()),
     double(h.LocalIndex()),h.GoodnessOfFit(),double(h.DegreesOfFreedom())}};
 }
 }
