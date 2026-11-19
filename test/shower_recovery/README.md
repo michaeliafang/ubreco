@@ -66,3 +66,24 @@ and gallery display on GPVM; standalone tests cannot exercise their publication.
 Per reconstructed recovery candidate, logs now show its planes, reconstruction
 pass flag, squared start/direction magnitudes and final usability. Detailed tool
 exceptions remain in the full log (they may be excluded by the diagnostic grep).
+
+Start/valley update: defaults now allow 3 cm support gaps, disable the early-hit
+fraction requirement (MinTrackFraction: 0), and use a 5 degree minimum opening.
+The count/span/near-vertex support requirements and 20% daughter charge cut remain.
+The gap relaxation is not dead-wire-aware; detached fragments can still fail.
+
+Among candidates passing all existing cuts, ranking now prefers a larger valley
+score, then a smaller graph cut fraction. It no longer prefers larger opening
+angles on ties. Four equal longitudinal bands cover 2--10 cm by default along
+the fitted direction bisector. Each compares equal-area strips centered on the
+two rays and their midpoint. The common half-width is min(TrackWidth, separation/4);
+regions narrower than 0.15 cm contribute no evidence. A band needs at least two
+hits in each side strip; its score is max(0, 1 - middle_count/min(side_counts)).
+The overall score averages all four bands, including zero for unsupported bands.
+Thus an empty side cannot create positive evidence, and one crossing branch
+need not erase evidence elsewhere. The score uses hit counts, not charge.
+`valley_score` and `valley_bands` are logged for each evaluated large cluster's
+best split. No valley threshold rejects candidates. This is not a dead-wire or
+induction-artifact discriminator; those effects can still bias the score.
+Tests cover missing-hit gaps, off-axis dilution, empty/single-sided bands,
+filled valleys, a localized bridge, rotation and ranking fallback.

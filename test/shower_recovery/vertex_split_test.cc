@@ -139,6 +139,59 @@ int main() {
   for (auto& h : shifted) h.t -= 2.;
   partition(splitAtVertex(shifted,cfg),shifted.size());
 
+  // Missing-hit band wider than the old gap cut retains both starts.
+  auto deadBand = touching;
+  deadBand.erase(std::remove_if(deadBand.begin(),deadBand.end(),[](const auto& h) {
+    const double r = std::hypot(h.w,h.t);
+    return r > 3. && r < 5.2;
+  }),deadBand.end());
+  partition(splitAtVertex(deadBand,cfg),deadBand.size());
+
+  // Off-axis activity no longer dilutes a clear line's supporting-hit fraction.
+  std::vector<Hit2D> branchy;
+  for (double x=0.5; x<9.; x+=0.4) {
+    branchy.push_back({x,0.,1.});
+    branchy.push_back({x,2.,1.});
+    branchy.push_back({x,-2.,1.});
+  }
+  std::vector<std::size_t> early;
+  for (std::size_t i=0; i<branchy.size(); ++i) early.push_back(i);
+  std::vector<unsigned int> sides(branchy.size(),0);
+  CHECK(earlyTrack(branchy,early,sides,0,cfg).valid);
+  auto oldFraction = cfg; oldFraction.minTrackFraction = 0.6;
+  CHECK(!earlyTrack(branchy,early,sides,0,oldFraction).valid);
+
+  // Direct density tests isolate ranking from the start-fitting and graph cuts.
+  EarlyTrack a{std::cos(20.*pi/180.),-std::sin(20.*pi/180.),0.,0.,true};
+  EarlyTrack b{a.w,-a.t,0.,0.,true};
+  std::vector<Hit2D> valley;
+  ray(valley,-20.,1.,12.);
+  ray(valley,20.,1.,12.);
+  const auto clear = valleyEvidence(valley,a,b,cfg);
+  CHECK(clear.bands == 4 && clear.score > 0.99);
+  auto crossing = valley;
+  for (double y=-2.; y<=2.; y+=0.1) crossing.push_back({5.,y,1.});
+  const auto bridged = valleyEvidence(crossing,a,b,cfg);
+  CHECK(bridged.score > 0. && bridged.score < clear.score);
+  auto filled = valley;
+  for (double x=2.; x<10.; x+=0.1) filled.push_back({x,0.,1.});
+  CHECK(valleyEvidence(filled,a,b,cfg).score < bridged.score);
+  std::vector<Hit2D> oneSide;
+  ray(oneSide,-20.,1.,12.);
+  CHECK(valleyEvidence(oneSide,a,b,cfg).score == 0.);
+  CHECK(valleyEvidence({},a,b,cfg).score == 0.);
+  auto rotated = valley;
+  for (auto& h : rotated) { const auto w=h.w; h.w=-h.t; h.t=w; }
+  EarlyTrack ar{-a.t,a.w,0.,0.,true}, br{-b.t,b.w,0.,0.,true};
+  CHECK(std::abs(valleyEvidence(rotated,ar,br,cfg).score-clear.score) < 1.e-12);
+  Split preferred, fallback;
+  preferred.parts = {{{0},{1}}}; fallback.parts = preferred.parts;
+  preferred.valleyScore = clear.score; preferred.cutFraction = 0.1;
+  fallback.valleyScore = bridged.score; fallback.cutFraction = 0.01;
+  CHECK(betterSplit(preferred,fallback));
+  preferred.valleyScore = fallback.valleyScore = 0.;
+  CHECK(betterSplit(fallback,preferred)); // absent valley evidence falls back to cut
+
   // Dense inputs have a bounded graph allocation and an explicit rejection.
   auto bounded = cfg;
   bounded.maxEdges = 1;

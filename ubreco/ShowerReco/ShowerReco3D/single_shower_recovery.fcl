@@ -18,14 +18,14 @@ single_shower_recovery: {
   MaxStartRadius: 5.0         # cm; at least MinStartHits on each sustained start
   MinStartHits: 3
   MinTrackSpan: 3.0           # cm along each early trajectory
-  MaxTrackGap: 1.5            # cm; maximum gap along a supported run
+  MaxTrackGap: 3.0            # cm; maximum gap along a supported run
   TrackWidth: 0.6             # cm; perpendicular distance from fitted ray
-  MinTrackFraction: 0.6       # fraction of daughter's early hits in sustained run
+  MinTrackFraction: 0.0       # disabled; retain minimum support count and span
   MaxEdges: 200000            # reject excessively dense candidates
   MaxMatchTrials: 4           # maximum cross-plane matching retries per event
   MaxRecoShowers: 4           # total additional proto-showers reconstructed per event
   AngleStepDegrees: 2.0
-  MinOpeningDegrees: 10.0      # between upstream mean directions, not the merger's 15 deg
+  MinOpeningDegrees: 5.0      # between upstream mean directions, not the merger's 15 deg
   MinChargeFraction: 0.20      # each daughter must carry >=20% of parent cluster charge
   MaxCutFraction: 0.15
   MaxCandidatesPerPlane: 2     # up to 26 candidates, bounded by MaxMatchTrials

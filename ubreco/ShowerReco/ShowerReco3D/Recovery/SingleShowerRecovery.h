@@ -48,15 +48,15 @@ public:
     cfg_.innerRadius = p.get<double>("InnerRadius", 0.);
     cfg_.upstreamRadius = p.get<double>("UpstreamRadius", 10.);
     cfg_.angleStepDegrees = p.get<double>("AngleStepDegrees", 2.);
-    cfg_.minOpeningDegrees = p.get<double>("MinOpeningDegrees", 10.);
+    cfg_.minOpeningDegrees = p.get<double>("MinOpeningDegrees", 5.);
     cfg_.minChargeFraction = p.get<double>("MinChargeFraction", 0.20);
     cfg_.maxCutFraction = p.get<double>("MaxCutFraction", 0.15);
     cfg_.maxStartRadius = p.get<double>("MaxStartRadius", 5.);
     cfg_.minStartHits = p.get<unsigned int>("MinStartHits", 3);
     cfg_.minTrackSpan = p.get<double>("MinTrackSpan", 3.);
-    cfg_.maxTrackGap = p.get<double>("MaxTrackGap", 1.5);
+    cfg_.maxTrackGap = p.get<double>("MaxTrackGap", 3.0);
     cfg_.trackWidth = p.get<double>("TrackWidth", 0.6);
-    cfg_.minTrackFraction = p.get<double>("MinTrackFraction", 0.6);
+    cfg_.minTrackFraction = p.get<double>("MinTrackFraction", 0.0);
     cfg_.maxEdges = p.get<unsigned int>("MaxEdges", 200000);
     cfg_.validate();
     useSpacePoints_ = p.get<bool>("UseSpacePoints",false);
@@ -159,12 +159,13 @@ public:
         std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " plane=" << plane << " cluster=" << c
           << " hits=" << points.size() << " track_pairs=" << diagnostics.trackPairs
           << " balanced_pairs=" << diagnostics.balancedPairs << " connection_pass=" << diagnostics.connectedPairs
+          << " valley_score=" << split.valleyScore << " valley_bands=" << split.valleyBands
           << " edge_limit=" << diagnostics.edgeLimit << " split=" << split.valid() << std::endl;
       if (split.valid()) candidates[plane].push_back({c, std::move(split)});
     }
     for (auto& plane : candidates) {
       std::stable_sort(plane.begin(), plane.end(), [](const Candidate& a, const Candidate& b) {
-        return a.split.cutFraction < b.split.cutFraction;
+        return betterSplit(a.split,b.split);
       });
       if (plane.size() > maxCandidates_) plane.resize(maxCandidates_);
     }

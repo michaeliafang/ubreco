@@ -26,12 +26,12 @@ struct SplitConfig {
   double maxStartRadius = 5.;
   std::size_t minStartHits = 3;
   double minTrackSpan = 3.;
-  double maxTrackGap = 1.5;
+  double maxTrackGap = 3.0;
   double trackWidth = 0.6;
-  double minTrackFraction = 0.6;
+  double minTrackFraction = 0.0;
   std::size_t maxEdges = 200000;
   double angleStepDegrees = 2.;
-  double minOpeningDegrees = 10.;
+  double minOpeningDegrees = 5.;
   double minChargeFraction = 0.20;
   double maxCutFraction = 0.15;
 
@@ -41,7 +41,7 @@ struct SplitConfig {
         !std::isfinite(minTrackSpan) || minTrackSpan <= 0. || minTrackSpan > upstreamRadius ||
         !std::isfinite(maxTrackGap) || maxTrackGap <= 0. ||
         !std::isfinite(trackWidth) || trackWidth <= 0. ||
-        !std::isfinite(minTrackFraction) || minTrackFraction <= 0. || minTrackFraction > 1. ||
+        !std::isfinite(minTrackFraction) || minTrackFraction < 0. || minTrackFraction > 1. ||
         minHits < 2 || minUpstreamHits == 0 || maxHits < 2 * minHits ||
         !std::isfinite(neighborRadius) || neighborRadius <= 0. ||
         !std::isfinite(innerRadius) || innerRadius < 0. ||
@@ -57,6 +57,8 @@ struct Split {
   std::array<std::vector<std::size_t>, 2> parts;
   double cutFraction = std::numeric_limits<double>::infinity();
   double openingDegrees = 0.;
+  double valleyScore = 0.;
+  std::size_t valleyBands = 0;
   bool valid() const { return !parts[0].empty() && !parts[1].empty(); }
 };
 
@@ -143,6 +145,55 @@ inline EarlyTrack earlyTrack(const std::vector<Hit2D>& hits,
     }
   }
   return result;
+}
+
+// Compare three strips of identical area in each longitudinal band: one
+// around each ray and one midway between them. Their common half-width adapts
+// to the ray separation, preventing overlap or a narrow gap winning by area.
+// Four bands cover 2 cm to upstreamRadius along the direction bisector.
+// Missing bilateral support contributes zero, not evidence for a valley.
+struct ValleyEvidence { double score = 0.; std::size_t bands = 0; };
+inline ValleyEvidence valleyEvidence(const std::vector<Hit2D>& hits,
+                                     const EarlyTrack& a, const EarlyTrack& b,
+                                     const SplitConfig& cfg) {
+  ValleyEvidence result;
+  const double norm = std::hypot(a.w+b.w,a.t+b.t);
+  if (norm < 1.e-6 || cfg.upstreamRadius <= 2.) return result;
+  const double x = (a.w+b.w)/norm, y = (a.t+b.t)/norm;
+  const double da = a.w*x+a.t*y, db = b.w*x+b.t*y;
+  if (da <= 0.1 || db <= 0.1) return result;
+  std::array<std::array<std::size_t,3>,4> counts{};
+  for (const auto& h : hits) {
+    const double along = h.w*x+h.t*y;
+    if (along < 2. || along >= cfg.upstreamRadius) continue;
+    const double ta = (along-a.originW*x-a.originT*y)/da;
+    const double tb = (along-b.originW*x-b.originT*y)/db;
+    if (ta <= 0. || tb <= 0.) continue;
+    const double ca = -(a.originW+ta*a.w)*y+(a.originT+ta*a.t)*x;
+    const double cb = -(b.originW+tb*b.w)*y+(b.originT+tb*b.t)*x;
+    const double width = std::min(cfg.trackWidth,std::abs(ca-cb)/4.);
+    // No positive evidence where the strips are narrower than half a wire pitch.
+    if (width < 0.15) continue;
+    const auto band = std::min<std::size_t>(3,4*(along-2.)/(cfg.upstreamRadius-2.));
+    const double across = -h.w*y+h.t*x;
+    counts[band][0] += std::abs(across-ca) < width;
+    counts[band][1] += std::abs(across-cb) < width;
+    counts[band][2] += std::abs(across-(ca+cb)/2.) < width;
+  }
+  for (const auto& count : counts) {
+    const auto support = std::min(count[0],count[1]);
+    if (support < 2) continue;
+    ++result.bands;
+    result.score += std::max(0.,1.-double(count[2])/support)/counts.size();
+  }
+  return result;
+}
+
+// A valley is ranking evidence only; zero evidence never vetoes a split.
+inline bool betterSplit(const Split& a, const Split& b) {
+  if (!b.valid()) return a.valid();
+  if (a.valleyScore != b.valleyScore) return a.valleyScore > b.valleyScore;
+  return a.cutFraction < b.cutFraction;
 }
 
 // A deliberately separate scoring graph: Euclidean neighbors, not the original
@@ -236,12 +287,14 @@ inline Split splitAtVertex(const std::vector<Hit2D>& hits, const SplitConfig& cf
     const double fraction = double(cut) / (2.*std::min(internal[0], internal[1]) + cut);
     if (fraction > cfg.maxCutFraction) continue;
     ++diag.connectedPairs;
-    if (fraction > best.cutFraction ||
-        (fraction == best.cutFraction && opening <= best.openingDegrees)) continue;
-    best.parts = {};
-    best.cutFraction = fraction;
-    best.openingDegrees = opening;
-    for (std::size_t i = 0; i < hits.size(); ++i) best.parts[side[i]].push_back(i);
+    const auto valley = valleyEvidence(hits,left,right,cfg);
+    Split candidate;
+    candidate.cutFraction = fraction;
+    candidate.openingDegrees = opening;
+    candidate.valleyScore = valley.score;
+    candidate.valleyBands = valley.bands;
+    for (std::size_t i = 0; i < hits.size(); ++i) candidate.parts[side[i]].push_back(i);
+    if (betterSplit(candidate,best)) best = std::move(candidate);
   }
   return best;
 }
