@@ -113,7 +113,7 @@ public:
     art::FindManyP<recob::Hit> associations(clusters, e, clusterLabel);
     const auto clock = art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(e);
     cluster::ClusterMaker maker;
-    if (!maker.loadVertex(clock, vertices)) return none;
+    if (!maker.loadVertex(clock, vertices)) { report("vertex_load_failed"); return none; }
     const auto& wires = art::ServiceHandle<geo::WireReadout>()->Get();
     // Match the existing ClusterMaker and ProtoShowerCMTool job-level conversions.
     const auto jobClock = art::ServiceHandle<detinfo::DetectorClocksService>()->DataForJob();
@@ -130,11 +130,17 @@ public:
       const auto& hits = allHits.back();
       if (hits.empty()) continue;
       const unsigned int plane = hits.front()->WireID().Plane;
-      if (plane >= 3) return none;
+      if (plane >= 3) { report("invalid_plane"); return none; }
       std::vector<Hit2D> points;
       for (const auto& h : hits) {
         // Do not create ambiguous/doubled hit ownership from malformed input.
-        if (h->WireID().Plane != plane || !uniqueHits.insert(h).second) return none;
+        if (h->WireID().Plane != plane || !uniqueHits.insert(h).second) {
+          std::cout << "[SingleShowerRecovery] event " << e.id()
+            << " cluster=" << c << " plane=" << plane << " hit_key=" << h.key()
+            << " hit_product=" << h.id() << " hit_plane=" << h->WireID().Plane << std::endl;
+          report(h->WireID().Plane != plane ? "mixed_plane_cluster" : "repeated_input_hit");
+          return none;
+        }
         const double vw = wires.Plane(geo::PlaneID(0,0,plane)).WireCoordinate(vertex)*wire2cm + 0.15;
         const double vt = vertex.X() + trigger_offset(clock)*time2cm + plane*0.3;
         points.push_back({h->WireID().Wire*wire2cm-vw, h->PeakTime()*time2cm-vt, h->Integral()});
