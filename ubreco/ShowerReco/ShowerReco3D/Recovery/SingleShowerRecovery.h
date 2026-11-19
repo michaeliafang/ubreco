@@ -87,7 +87,8 @@ public:
 
   RecoveryResult run(art::Event& e, const std::string& clusterLabel, const std::string& vertexLabel,
                      const HitList& originalHits, const std::vector<double>& calibration,
-                     ShrRecoManager& reco, const util::GeometryUtilities& geometry) {
+                     ShrRecoManager& reco, const util::GeometryUtilities& geometry,
+                     RecoveryResult* diagnostic = nullptr) {
     const auto started = std::chrono::steady_clock::now();
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
     std::size_t duplicatesRemoved = 0, overlappingInputHits = 0, ownershipRejected = 0;
@@ -167,6 +168,33 @@ public:
       });
       if (plane.size() > maxCandidates_) plane.resize(maxCandidates_);
     }
+    // Use exactly the same cluster conversion for diagnostics and reconstruction.
+    const auto appendCluster = [&](RecoveryResult& output, const HitList& hits) {
+      cluster::Cluster cm;
+      maker.MakeCluster(hits, cm);
+      const geo::PlaneID id(0,0,cm._plane);
+      output.clusters.emplace_back(
+        cm._start_pt._w/wire2cm,0.,cm._start_pt._t/time2cm,0.,0.,cm._angle,0.,
+        cm._end_pt._w/wire2cm,0.,cm._end_pt._t/time2cm,0.,0.,0.,0.,
+        cm._sum_charge,0.,cm._sum_charge,0.,hits.size(),0.,0.,output.clusters.size(),wires.Plane(id).View(),id);
+      return cm;
+    };
+    if (diagnostic) {
+      *diagnostic = RecoveryResult{};
+      for (std::size_t plane = 0; plane < candidates.size(); ++plane)
+        for (const auto& candidate : candidates[plane]) {
+          const auto first = diagnostic->clusters.size();
+          for (const auto& part : candidate.split.parts) {
+            HitList hits;
+            for (auto index : part) hits.push_back(allHits[candidate.cluster].at(index));
+            appendCluster(*diagnostic,hits);
+            diagnostic->clusterHits.push_back(std::move(hits));
+          }
+          std::cout << "[SingleShowerRecovery] event " << e.id()
+            << " candidate_plane=" << plane << " source_cluster=" << candidate.cluster
+            << " diagnostic_clusters=" << first << "," << first+1 << std::endl;
+        }
+    }
     const std::set<art::Ptr<recob::Hit>> original(originalHits.begin(), originalHits.end());
     // Each plane can retain its existing clusters or split one candidate.
     // At most (MaxCandidatesPerPlane+1)^3-1 trials; first successful trial wins.
@@ -208,16 +236,8 @@ public:
             }
           }
           std::vector<cluster::Cluster> cmClusters;
-          for (const auto& hits : trial.clusterHits) {
-            cluster::Cluster cm;
-            maker.MakeCluster(hits, cm);
-            cmClusters.push_back(cm);
-            const geo::PlaneID id(0,0,cm._plane);
-            trial.clusters.emplace_back(
-              cm._start_pt._w/wire2cm,0.,cm._start_pt._t/time2cm,0.,0.,cm._angle,0.,
-              cm._end_pt._w/wire2cm,0.,cm._end_pt._t/time2cm,0.,0.,0.,0.,
-              cm._sum_charge,0.,cm._sum_charge,0.,hits.size(),0.,0.,trial.clusters.size(),wires.Plane(id).View(),id);
-          }
+          for (const auto& hits : trial.clusterHits)
+            cmClusters.push_back(appendCluster(trial,hits));
           matcher_.Reset();
           matcher_.SetClusters(cmClusters);
           matcher_.Process();
@@ -278,6 +298,14 @@ public:
           reco.SetProtoShowers(protos);
           std::vector<Shower_t> reconstructed;
           reco.Reconstruct(geometry, reconstructed);
+          for (const auto& shower : reconstructed) {
+            std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+              << " reco_candidate=" << shower.fIndex << " passed=" << shower.fPassedReconstruction
+              << " start_mag2=" << shower.fXYZStart.Mag2() << " direction_mag2=" << shower.fDCosStart.Mag2()
+              << " usable=" << usableShower(shower) << " planes=";
+            for (auto ci : matches.at(shower.fIndex)) std::cout << trial.clusters.at(ci).Plane().Plane << ",";
+            std::cout << std::endl;
+          }
           for (auto shower : reconstructed) if (usableShower(shower)) {
             trial.matches.push_back(matches.at(shower.fIndex));
             shower.fIndex = trial.showers.size();

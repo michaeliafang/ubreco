@@ -47,3 +47,22 @@ Diagnostics report `duplicates_removed`, `overlapping_input_hits` (extra cluster
 references after within-cluster deduplication), and `ownership_rejected`.
 `hit_ownership_test.cc` checks the standalone deduplication and disjointness
 helpers. Full matching, reconstruction and event associations require GPVM tests.
+
+With `SingleShowerRecovery.SaveSplitCandidates: true` (enabled in the recovery
+FCL), the reconstruction module also writes clusters and cluster-to-hit
+associations with instance name `showersplitCandidates`. In the split-label job,
+the full input tag is `showersplittest:showersplitCandidates`. This is diagnostic
+output, not another shower producer. Consecutive clusters (0/1, 2/3, etc.) are
+the two daughters of each retained candidate, ordered by plane then candidate
+rank. The log maps each pair to its original cmerger cluster. Candidates are
+saved before cross-plane matching, including when the baseline shower is retained.
+These are the best split per source cluster, subject to MaxCandidatesPerPlane,
+not every angular trial. Empty output means no retained candidates or recovery
+was not attempted. Alternatives may share hits; they are not simultaneous showers.
+Disable SaveSplitCandidates to omit these extra products. Existing shower and
+accepted recovery products are unaffected. Validate the art products/associations
+and gallery display on GPVM; standalone tests cannot exercise their publication.
+
+Per reconstructed recovery candidate, logs now show its planes, reconstruction
+pass flag, squared start/direction magnitudes and final usability. Detailed tool
+exceptions remain in the full log (they may be excluded by the diagnostic grep).

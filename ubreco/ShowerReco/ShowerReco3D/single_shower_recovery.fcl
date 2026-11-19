@@ -6,6 +6,7 @@ BEGIN_PROLOG
 # This table is inert until assigned to showerreco3d.SingleShowerRecovery.
 single_shower_recovery: {
   Enable: true
+  SaveSplitCandidates: true
   MatchTool: @local::match_cfalgoiou
   PriorityTool: @local::priority_cpalgonhits
   MinHits: 10

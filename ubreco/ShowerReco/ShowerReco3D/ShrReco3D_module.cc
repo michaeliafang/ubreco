@@ -93,6 +93,7 @@ private:
   bool fFillTree;
   std::unique_ptr<showerreco::recovery::SingleShowerRecovery> fRecovery;
   std::vector<double> fRecoveryCalibration;
+  bool fSaveSplitCandidates = false;
   
   /// map for backtracking which stores mcshower index to vector of track ids for the mcshower
   std::map<size_t, std::vector<unsigned int> > _MCShowerInfo;  
@@ -262,6 +263,11 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
         protoshower_pset.get<std::string>("Vtxproducer") != fVtxproducer)
       throw std::invalid_argument("SingleShowerRecovery requires consistent ProtoShowerCMTool inputs");
     fRecovery.reset(new showerreco::recovery::SingleShowerRecovery(recovery));
+    fSaveSplitCandidates = recovery.get<bool>("SaveSplitCandidates",false);
+    if (fSaveSplitCandidates) {
+      produces<std::vector<recob::Cluster>>("showersplitCandidates");
+      produces<art::Assns<recob::Cluster,recob::Hit>>("showersplitCandidates");
+    }
     produces<std::vector<recob::Cluster>>("recovery");
     produces<std::vector<recob::PFParticle>>("recovery");
     produces<art::Assns<recob::Cluster,recob::Hit>>("recovery");
@@ -360,13 +366,15 @@ void ShrReco3D::produce(art::Event & e)
   auto recoveryClusterHits = std::make_unique<art::Assns<recob::Cluster,recob::Hit>>();
   auto recoveryPFPClusters = std::make_unique<art::Assns<recob::PFParticle,recob::Cluster>>();
   auto recoveryPFPHits = std::make_unique<art::Assns<recob::PFParticle,recob::Hit>>();
+  showerreco::recovery::RecoveryResult diagnostic;
   const auto usable = [](const showerreco::Shower_t& s) {
     return showerreco::recovery::usableShower(s);
   };
   if (fRecovery && std::count_if(output_shower_v.begin(), output_shower_v.end(), usable) == 1) {
     const auto baseline = std::find_if(output_shower_v.begin(), output_shower_v.end(), usable);
     auto recovered = fRecovery->run(e, fClusproducer, fVtxproducer,
-      pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser);
+      pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser,
+      fSaveSplitCandidates ? &diagnostic : nullptr);
     // Never replace a usable baseline by zero, one, or more than two showers.
     if (recovered.showers.size() == 2) {
       art::PtrMaker<recob::Cluster> makeCluster(e, "recovery");
@@ -413,6 +421,15 @@ void ShrReco3D::produce(art::Event & e)
     }
   }// for all output reconstructed showers
   
+  if (fSaveSplitCandidates) {
+    auto clusters = std::make_unique<std::vector<recob::Cluster>>(std::move(diagnostic.clusters));
+    auto links = std::make_unique<art::Assns<recob::Cluster,recob::Hit>>();
+    art::PtrMaker<recob::Cluster> makeCluster(e,"showersplitCandidates");
+    for (std::size_t ci = 0; ci < diagnostic.clusterHits.size(); ++ci)
+      for (const auto& hit : diagnostic.clusterHits[ci]) links->addSingle(makeCluster(ci),hit);
+    e.put(std::move(clusters),"showersplitCandidates");
+    e.put(std::move(links),"showersplitCandidates");
+  }
   if (fRecovery) {
     e.put(std::move(recoveryClusters), "recovery");
     e.put(std::move(recoveryPFPs), "recovery");
