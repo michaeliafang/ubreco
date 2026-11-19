@@ -3,6 +3,7 @@
 #define UBRECO_SINGLESHOWERRECOVERY_H
 
 #include "VertexSplit.h"
+#include "HitOwnership.h"
 #include "SpacePointConsistency.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
 #include "canvas/Utilities/InputTag.h"
@@ -89,12 +90,15 @@ public:
                      ShrRecoManager& reco, const util::GeometryUtilities& geometry) {
     const auto started = std::chrono::steady_clock::now();
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
+    std::size_t duplicatesRemoved = 0, overlappingInputHits = 0, ownershipRejected = 0;
     const auto report = [&](const char* status) {
       const double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
       std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " status=" << status
         << " trials=" << trials << " matched_pairs=" << matched
         << " reco_showers=" << recoShowers << " usable_pairs=" << usablePairs
         << " coverage_rejected=" << coverageRejected << " contribution_rejected=" << contributionRejected
+        << " duplicates_removed=" << duplicatesRemoved << " overlapping_input_hits=" << overlappingInputHits
+        << " ownership_rejected=" << ownershipRejected
         << " budget_skipped=" << budgetSkipped << " recovery_ms=" << ms << std::endl;
     };
     RecoveryResult none;
@@ -126,19 +130,22 @@ public:
     std::vector<HitList> allHits;
     std::set<art::Ptr<recob::Hit>> uniqueHits;
     for (std::size_t c = 0; c < clusters->size(); ++c) {
-      allHits.push_back(associations.at(c));
+      const auto inputHits = associations.at(c);
+      allHits.push_back(uniqueHitsInOrder(inputHits));
+      duplicatesRemoved += inputHits.size()-allHits.back().size();
       const auto& hits = allHits.back();
       if (hits.empty()) continue;
       const unsigned int plane = hits.front()->WireID().Plane;
       if (plane >= 3) { report("invalid_plane"); return none; }
       std::vector<Hit2D> points;
       for (const auto& h : hits) {
-        // Do not create ambiguous/doubled hit ownership from malformed input.
-        if (h->WireID().Plane != plane || !uniqueHits.insert(h).second) {
+        // Overlapping input clusters remain alternatives until output ownership is checked.
+        overlappingInputHits += !uniqueHits.insert(h).second;
+        if (h->WireID().Plane != plane) {
           std::cout << "[SingleShowerRecovery] event " << e.id()
             << " cluster=" << c << " plane=" << plane << " hit_key=" << h.key()
             << " hit_product=" << h.id() << " hit_plane=" << h->WireID().Plane << std::endl;
-          report(h->WireID().Plane != plane ? "mixed_plane_cluster" : "repeated_input_hit");
+          report("mixed_plane_cluster");
           return none;
         }
         const double vw = wires.Plane(geo::PlaneID(0,0,plane)).WireCoordinate(vertex)*wire2cm + 0.15;
@@ -185,14 +192,19 @@ public:
             selected[candidate.cluster] = &candidate.split;
           }
           RecoveryResult trial;
+          std::vector<std::array<std::size_t,2>> splitChildren;
           for (std::size_t ci = 0; ci < allHits.size(); ++ci) {
             if (allHits[ci].empty()) continue;
             const auto found = selected.find(ci);
             if (found == selected.end()) trial.clusterHits.push_back(allHits[ci]);
-            else for (const auto& part : found->second->parts) {
-              HitList hits;
-              for (auto index : part) hits.push_back(allHits[ci].at(index));
-              trial.clusterHits.push_back(std::move(hits));
+            else {
+              const auto firstChild = trial.clusterHits.size();
+              splitChildren.push_back({{firstChild,firstChild+1}});
+              for (const auto& part : found->second->parts) {
+                HitList hits;
+                for (auto index : part) hits.push_back(allHits[ci].at(index));
+                trial.clusterHits.push_back(std::move(hits));
+              }
             }
           }
           std::vector<cluster::Cluster> cmClusters;
@@ -273,6 +285,10 @@ public:
           }
           if (trial.showers.size() != 2) continue;
           ++usablePairs;
+          std::array<HitList,2> outputHits;
+          for (std::size_t s = 0; s < 2; ++s) for (auto ci : trial.matches[s])
+            outputHits[s].insert(outputHits[s].end(),trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
+          if (!disjointHits(outputHits[0],outputHits[1])) { ++ownershipRejected; continue; }
           std::set<art::Ptr<recob::Hit>> recovered;
           for (const auto& match : trial.matches) for (auto ci : match)
             recovered.insert(trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
@@ -282,13 +298,13 @@ public:
           // A split must actually contribute both pieces to the accepted pair.
           // Otherwise unrelated unmatched fragments could masquerade as recovery.
           bool contributes = false;
-          for (const auto& entry : selected) {
-            std::array<bool,2> used{{false,false}};
-            for (std::size_t s = 0; s < 2; ++s) for (auto ci : trial.matches[s])
-              for (const auto& hit : trial.clusterHits[ci])
-                if (std::find(allHits[entry.first].begin(),allHits[entry.first].end(),hit) != allHits[entry.first].end())
-                  used[s] = true;
-            contributes = contributes || (used[0] && used[1]);
+          for (const auto& children : splitChildren) {
+            const auto contains = [&](std::size_t shower, std::size_t child) {
+              const auto& match = trial.matches[shower];
+              return std::find(match.begin(),match.end(),child) != match.end();
+            };
+            contributes = contributes || (contains(0,children[0]) && contains(1,children[1]))
+                                      || (contains(1,children[0]) && contains(0,children[1]));
           }
           if (!contributes) { ++contributionRejected; continue; }
           report("accepted");

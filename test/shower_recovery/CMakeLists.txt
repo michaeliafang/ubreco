@@ -1,2 +1,3 @@
 cet_test(vertex_split_test SOURCES vertex_split_test.cc)
 cet_test(spacepoint_mapping_test SOURCES spacepoint_mapping_test.cc)
+cet_test(hit_ownership_test SOURCES hit_ownership_test.cc)

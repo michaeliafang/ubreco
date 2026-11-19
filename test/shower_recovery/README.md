@@ -36,3 +36,14 @@ The study writes per-trial CSV, JSON summaries, labeled example CSVs, and PNG
 truth/assignment comparisons. Results are toy stress measurements, not physical
 signal efficiencies or neutrino/EXT background rates. Splitter defaults remain
 unchanged by the study.
+
+Input hit ownership: recovery removes repeated hit pointers within each cluster
+before computing charge or split geometry, preserving first-occurrence order.
+Overlapping input clusters remain independent candidates. A final usable shower
+pair is rejected if its members share any hit pointer; unused clusters do not
+trigger this guard. At least one selected split must supply its actual daughter
+clusters to different output showers. Hit identity includes product ID and key.
+Diagnostics report `duplicates_removed`, `overlapping_input_hits` (extra cluster
+references after within-cluster deduplication), and `ownership_rejected`.
+`hit_ownership_test.cc` checks the standalone deduplication and disjointness
+helpers. Full matching, reconstruction and event associations require GPVM tests.
