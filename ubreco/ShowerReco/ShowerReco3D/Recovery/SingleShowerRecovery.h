@@ -1,3 +1,4 @@
+#include <iostream>
 #ifndef UBRECO_SINGLESHOWERRECOVERY_H
 #define UBRECO_SINGLESHOWERRECOVERY_H
 
@@ -90,11 +91,11 @@ public:
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
     const auto report = [&](const char* status) {
       const double ms = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
-      mf::LogInfo("SingleShowerRecovery") << "event " << e.id() << " status=" << status
+      std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " status=" << status
         << " trials=" << trials << " matched_pairs=" << matched
         << " reco_showers=" << recoShowers << " usable_pairs=" << usablePairs
         << " coverage_rejected=" << coverageRejected << " contribution_rejected=" << contributionRejected
-        << " budget_skipped=" << budgetSkipped << " recovery_ms=" << ms;
+        << " budget_skipped=" << budgetSkipped << " recovery_ms=" << ms << std::endl;
     };
     RecoveryResult none;
     const auto vertices = e.getValidHandle<std::vector<recob::Vertex>>(vertexLabel);
@@ -141,10 +142,10 @@ public:
       SplitDiagnostics diagnostics;
       auto split = splitAtVertex(points, cfg_, &diagnostics);
       if (points.size() >= 2*cfg_.minHits)
-        mf::LogInfo("SingleShowerRecovery") << "event " << e.id() << " plane=" << plane << " cluster=" << c
+        std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " plane=" << plane << " cluster=" << c
           << " hits=" << points.size() << " track_pairs=" << diagnostics.trackPairs
           << " balanced_pairs=" << diagnostics.balancedPairs << " connection_pass=" << diagnostics.connectedPairs
-          << " edge_limit=" << diagnostics.edgeLimit << " split=" << split.valid();
+          << " edge_limit=" << diagnostics.edgeLimit << " split=" << split.valid() << std::endl;
       if (split.valid()) candidates[plane].push_back({c, std::move(split)});
     }
     for (auto& plane : candidates) {
@@ -221,9 +222,9 @@ public:
             }
             const auto consistency = pointConsistency(assigned);
             const bool reject = consistency.weight >= minPointWeight_ && consistency.fraction() > maxPointConflict_;
-            mf::LogInfo("SingleShowerRecovery") << "event " << e.id() << " trial=" << trials
+            std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " trial=" << trials
               << " sps_points=" << consistency.informative << " sps_weight=" << consistency.weight
-              << " sps_conflict=" << consistency.fraction() << " sps_reject=" << reject;
+              << " sps_conflict=" << consistency.fraction() << " sps_reject=" << reject << std::endl;
             if (reject) continue;
           }
           // Never truncate a match set: that could hide a third usable shower.

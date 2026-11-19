@@ -1,3 +1,4 @@
+#include <iostream>
 ///////////////////////////////////////////////////////////////////////
 // Class:       Showerreco
 // Plugin Type: producer (art v2_09_06)
@@ -313,11 +314,11 @@ void ShrReco3D::produce(art::Event & e)
   const auto baselineStart = std::chrono::steady_clock::now();
   _manager->Reconstruct(gser, output_shower_v);
   if (fRecovery)
-    mf::LogInfo("SingleShowerRecovery") << "event " << e.id()
+    std::cout << "[SingleShowerRecovery] " << "event " << e.id()
       << " baseline_reco_ms=" << std::chrono::duration<double,std::milli>(
            std::chrono::steady_clock::now()-baselineStart).count()
       << " baseline_usable=" << std::count_if(output_shower_v.begin(),output_shower_v.end(),
-           showerreco::recovery::usableShower);
+           showerreco::recovery::usableShower) << std::endl;
 
   // if using truth, backtrack and load mcshowers
   if (fBacktrackTag != ""){
@@ -392,9 +393,9 @@ void ShrReco3D::produce(art::Event & e)
         }
       }
       output_shower_v = std::move(recovered.showers);
-      mf::LogInfo("SingleShowerRecovery") << "Recovered two showers in event " << e.id();
+      std::cout << "[SingleShowerRecovery] " << "Recovered two showers in event " << e.id() << std::endl;
     }
-    else mf::LogInfo("SingleShowerRecovery") << "Retaining single shower in event " << e.id();
+    else std::cout << "[SingleShowerRecovery] " << "Retaining single shower in event " << e.id() << std::endl;
   }
 
   // save output showers

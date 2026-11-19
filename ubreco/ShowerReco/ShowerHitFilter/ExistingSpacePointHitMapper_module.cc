@@ -1,3 +1,4 @@
+#include <iostream>
 #include "art/Framework/Core/EDProducer.h"
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
@@ -33,6 +34,7 @@ public:
     : EDProducer(p), points_(p.get<art::InputTag>("SpacePointProducer")),
       source_(p.get<art::InputTag>("SourceHitProducer")),
       selected_(p.get<art::InputTag>("SelectedHitProducer")) {
+    std::cout << "[ExistingSpacePointHitMapper] diagnostics_version=2" << std::endl;
     produces<art::Assns<recob::SpacePoint,recob::Hit>>();
     produces<std::vector<art::Ptr<recob::Hit>>>("source");
   }
@@ -68,12 +70,12 @@ public:
         ++associations;
       }
     }
-    mf::LogInfo("ExistingSpacePointHitMapper") << "event " << e.id()
+    std::cout << "[ExistingSpacePointHitMapper] " << "event " << e.id()
       << " source_hits=" << source->size() << " selected_hits=" << selected->size()
       << " matched=" << mapping.matched << " missing_selected=" << mapping.missing
       << " ambiguous_selected=" << mapping.ambiguous << " invalid_selected=" << mapping.invalid
       << " mapped_points=" << kept << " associations=" << associations
-      << " mapping_ms=" << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+      << " mapping_ms=" << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count() << std::endl;
     e.put(std::move(output));
     e.put(std::move(provenance),"source");
   }
