@@ -14,15 +14,3 @@ physics.producers.showersplittest.SingleShowerRecovery.SpacePointHitProducer: "s
 physics.producers.showersplittest.SingleShowerRecovery.MinSpacePointWeight: 6.0
 physics.producers.showersplittest.SingleShowerRecovery.MaxSpacePointConflict: 0.25
 physics.reco: [ pandoraTrack, nugraphshowerhits, spsshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]
-
-# Production message settings can suppress LogInfo. Keep a dedicated destination
-# for mapping/recovery diagnostics without enabling all reconstruction chatter.
-services.message.destinations.recoveryDiagnostics: {
-  type: "cout"
-  threshold: "INFO"
-  categories: {
-    default: { limit: 0 }
-    ExistingSpacePointHitMapper: { limit: -1 reportEvery: 1 }
-    SingleShowerRecovery: { limit: -1 reportEvery: 1 }
-  }
-}
