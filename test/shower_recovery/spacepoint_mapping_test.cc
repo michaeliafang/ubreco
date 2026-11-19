@@ -1,6 +1,7 @@
 #include "ubreco/ShowerReco/ShowerReco3D/Recovery/ExactHitMapping.h"
 #include "ubreco/ShowerReco/ShowerReco3D/Recovery/SpacePointConsistency.h"
 #include <cstdlib>
+#include <cmath>
 #include <iostream>
 #define CHECK(c) do { if (!(c)) { std::cerr << "Failed line " << __LINE__ << ": " << #c << '\n'; std::exit(EXIT_FAILURE); } } while(false)
 int main() {
@@ -24,5 +25,14 @@ int main() {
   score=pointConsistency({{{0,0,0},{1,0,1}}}); CHECK(score.informative==0);
   score=pointConsistency({{{0,0,0},{1,1,1}},{{0,0,0},{1,1,1}}});
   CHECK(score.weight==1. && score.fraction()==1.); // repeated shared hits do not multiply weight
+  // Global shower renaming cannot change conflict. Re-pairing one plane can.
+  std::vector<std::vector<AssignedPointHit>> paired{
+    {{0,0,0},{1,1,1}}, {{2,0,0},{3,1,1}}, {{4,0,0},{5,1,0}}};
+  const auto originalConflict = pointConsistency(paired).fraction();
+  for (auto& point : paired) for (auto& hit : point) hit.shower = 1-hit.shower;
+  CHECK(pointConsistency(paired).fraction() == originalConflict);
+  for (auto& point : paired) for (auto& hit : point)
+    if (hit.plane == 1) hit.shower = 1-hit.shower;
+  CHECK(std::abs(pointConsistency(paired).fraction()-(1.-originalConflict)) < 1.e-12);
   std::cout << "Spacepoint mapping and consistency tests passed\n";
 }

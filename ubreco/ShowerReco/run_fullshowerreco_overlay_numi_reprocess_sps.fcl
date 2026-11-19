@@ -13,4 +13,4 @@ physics.producers.showersplittest.SingleShowerRecovery.SpacePointProducer: "sps:
 physics.producers.showersplittest.SingleShowerRecovery.SpacePointHitProducer: "spsshowerhits"
 physics.producers.showersplittest.SingleShowerRecovery.MinSpacePointWeight: 6.0
 physics.producers.showersplittest.SingleShowerRecovery.MaxSpacePointConflict: 0.25
-physics.reco: [ pandoraTrack, nugraphshowerhits, spsshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]
+physics.reco: [ pandoraTrack, nugraphshowerhits, spsshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, showersplitCandidates, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]

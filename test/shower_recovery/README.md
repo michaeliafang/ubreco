@@ -87,3 +87,10 @@ best split. No valley threshold rejects candidates. This is not a dead-wire or
 induction-artifact discriminator; those effects can still bias the score.
 Tests cover missing-hit gaps, off-axis dilution, empty/single-sided bands,
 filled valleys, a localized bridge, rotation and ranking fallback.
+
+The split-label and existing-SPS jobs now schedule a display-only copier under
+module label `showersplitCandidates`. Its clusters and cluster-to-hit associations
+both use the default instance, avoiding viewers' loss of instance labels. The
+source `showersplittest:showersplitCandidates` remains intact. The copier logs
+cluster and association counts under `[ShowerSplitCandidateDisplay]`; it does not
+rerun splitting or alter reconstruction. Full art publication needs GPVM validation.

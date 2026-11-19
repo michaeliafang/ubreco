@@ -7,4 +7,10 @@ physics.producers.showersplittest: @local::physics.producers.showerreco3d
 physics.producers.showerreco3d: @erase
 physics.producers.pandora.ShowerProducer: "showersplittest"
 
-physics.reco: [ pandoraTrack, nugraphshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]
+physics.producers.showersplittest.SingleShowerRecovery.SaveSplitCandidates: true
+physics.producers.showersplitCandidates: {
+  module_type: "ShowerSplitCandidateDisplay"
+  ClusterProducer: "showersplittest:showersplitCandidates"
+}
+
+physics.reco: [ pandoraTrack, nugraphshowerhits, neutrinovertex, proximity, cmerger, cmatcher, showersplittest, showersplitCandidates, pandora, pandoracaloSCE, acpttrigtagger, flashmatch ]
