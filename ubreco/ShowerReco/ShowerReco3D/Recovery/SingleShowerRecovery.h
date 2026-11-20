@@ -60,7 +60,7 @@ public:
     cfg_.maxEdges = p.get<unsigned int>("MaxEdges", 200000);
     cfg_.validate();
     useSpacePoints_ = p.get<bool>("UseSpacePoints",false);
-    if (useSpacePoints_ && !diagnosticOnly) {
+    if (useSpacePoints_) {
       spacePointTag_ = p.get<art::InputTag>("SpacePointProducer");
       spacePointHitTag_ = p.get<art::InputTag>("SpacePointHitProducer");
     }
@@ -106,7 +106,7 @@ public:
     const auto vertices = e.getValidHandle<std::vector<recob::Vertex>>(vertexLabel);
     if (vertices->size() != 1 || (!diagnosticOnly && originalHits.empty())) { report("missing_vertex_or_hits"); return none; }
     std::vector<HitList> pointHits;
-    if (useSpacePoints_) {
+    if (useSpacePoints_ && !diagnosticOnly) {
       const auto points = e.getValidHandle<std::vector<recob::SpacePoint>>(spacePointTag_);
       const art::FindManyP<recob::Hit> links(points,e,spacePointHitTag_);
       for (std::size_t i=0; i<points->size(); ++i) {
