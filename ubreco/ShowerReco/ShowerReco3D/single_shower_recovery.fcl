@@ -8,8 +8,15 @@ single_shower_recovery: {
   Enable: true
   SaveSplitCandidates: true
   DiagnoseTwoShowers: true    # diagnostic fallback for ineligible two-shower events
-  DiagnoseThreeShowers: true  # diagnostic only; never replace three baseline showers
+  DiagnoseThreeShowers: true  # also save diagnostic splits of the original inputs
   RecoverTwoShowers: true     # independent experimental option
+  CombineTwoShowerHits: true  # combine both baseline showers per plane before splitting
+  RecoverThreeShowers: true   # attach a distant small fragment to either main shower
+  ThreeShowerMaxFragmentChargeFraction: 0.20 # strict less-than, total collection charge
+  MaxFragmentAttachmentAngle: 35.0 # degrees to parent direction, forward attachments only
+  SearchSubstantialClusterPairs: true # independent of original matcher group count
+  MaxPairClustersPerPlane: 3  # at most 36 two-plane assignments per split trial
+  MinPairPlaneChargeCoverage: 0.80 # selected clusters retain this fraction in EACH view
   DetachedShowerMinDistance: 20.0 # cm in 3D; strict greater-than
   DetachedShowerMaxChargeFraction: 0.30 # positive collection-plane charge; strict less-than
   RecoveredPairMaxStartDistance: 5.0 # both replacement starts within this 3D radius

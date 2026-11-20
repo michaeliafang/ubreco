@@ -97,6 +97,8 @@ private:
   bool fDiagnoseTwoShowers = false;
   bool fDiagnoseThreeShowers = false;
   bool fRecoverTwoShowers = false;
+  bool fCombineTwoShowers = false, fRecoverThreeShowers = false;
+  double fThreeDetachedFraction = 0.2, fFragmentAttachmentAngle = 35.;
   double fDetachedDistance = 20., fDetachedFraction = 0.3, fRecoveredStartDistance = 5.;
   
   /// map for backtracking which stores mcshower index to vector of track ids for the mcshower
@@ -271,6 +273,13 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
     fDiagnoseTwoShowers = recovery.get<bool>("DiagnoseTwoShowers",false);
     fDiagnoseThreeShowers = recovery.get<bool>("DiagnoseThreeShowers",false);
     fRecoverTwoShowers = recovery.get<bool>("RecoverTwoShowers",false);
+    fCombineTwoShowers = recovery.get<bool>("CombineTwoShowerHits",false);
+    fRecoverThreeShowers = recovery.get<bool>("RecoverThreeShowers",false);
+    fThreeDetachedFraction = recovery.get<double>("ThreeShowerMaxFragmentChargeFraction",0.2);
+    fFragmentAttachmentAngle = recovery.get<double>("MaxFragmentAttachmentAngle",35.);
+    if (!std::isfinite(fThreeDetachedFraction) || fThreeDetachedFraction<=0. || fThreeDetachedFraction>=0.5 ||
+        !std::isfinite(fFragmentAttachmentAngle) || fFragmentAttachmentAngle<=0. || fFragmentAttachmentAngle>90.)
+      throw std::invalid_argument("Invalid three-shower recovery configuration");
     fDetachedDistance = recovery.get<double>("DetachedShowerMinDistance",20.);
     fDetachedFraction = recovery.get<double>("DetachedShowerMaxChargeFraction",0.3);
     fRecoveredStartDistance = recovery.get<double>("RecoveredPairMaxStartDistance",5.);
@@ -386,44 +395,110 @@ void ShrReco3D::produce(art::Event & e)
   };
   const auto baselineUsable = std::count_if(output_shower_v.begin(),output_shower_v.end(),usable);
   auto baseline = std::find_if(output_shower_v.begin(),output_shower_v.end(),usable);
-  showerreco::recovery::HitList excluded;
-  bool recoverTwo = false;
-  if (fRecovery && fRecoverTwoShowers && baselineUsable==2) {
-    const auto vertices = e.getValidHandle<std::vector<recob::Vertex>>(fVtxproducer);
+  using showerreco::recovery::HitList;
+  using showerreco::recovery::RecoverySeed;
+  std::vector<RecoverySeed> seeds;
+  HitList originalHits;
+  bool recoverTwo=false, recoverThree=false;
+  if (fRecovery && ((fRecoverTwoShowers && baselineUsable==2) ||
+                    (fRecoverThreeShowers && baselineUsable==3))) {
+    const auto vertices=e.getValidHandle<std::vector<recob::Vertex>>(fVtxproducer);
     if (vertices->size()==1) {
-      std::array<std::size_t,2> indices{};
-      std::array<double,2> distances{}, charge{};
-      std::array<showerreco::recovery::HitList,2> hits;
-      std::size_t k=0;
-      const auto v = vertices->front().position();
+      std::vector<std::size_t> indices;
+      std::vector<double> distances, charge;
+      std::vector<HitList> hits;
+      const auto v=vertices->front().position();
       const TVector3 vertex(v.X(),v.Y(),v.Z());
       for (std::size_t i=0; i<output_shower_v.size(); ++i) if (usable(output_shower_v[i])) {
-        indices[k]=i;
-        distances[k]=(output_shower_v[i].fXYZStart-vertex).Mag();
-        hits[k]=showerreco::recovery::uniqueHitsInOrder(pfp_hit_assn_v.at(output_shower_v[i].fIndex));
-        for (const auto& hit : hits[k]) if (hit->WireID().Plane==2) {
+        indices.push_back(i);
+        distances.push_back((output_shower_v[i].fXYZStart-vertex).Mag());
+        hits.push_back(showerreco::recovery::uniqueHitsInOrder(pfp_hit_assn_v.at(output_shower_v[i].fIndex)));
+        charge.push_back(0.);
+        for (const auto& hit : hits.back()) if (hit->WireID().Plane==2) {
           const double q=hit->Integral();
-          if (!std::isfinite(q)) { charge[k]=std::numeric_limits<double>::quiet_NaN(); break; }
-          charge[k]+=std::max(0.,q);
+          if (!std::isfinite(q)) { charge.back()=std::numeric_limits<double>::quiet_NaN(); break; }
+          charge.back()+=std::max(0.,q);
         }
-        ++k;
       }
-      const int target = showerreco::recovery::recoveryTarget(distances,charge,fDetachedDistance,fDetachedFraction);
-      recoverTwo = target>=0 && showerreco::recovery::disjointHits(hits[0],hits[1]);
-      std::cout << "[SingleShowerRecovery] event " << e.id() << " two_shower_eligible=" << recoverTwo
-        << " start_distances=" << distances[0] << "," << distances[1]
-        << " collection_charges=" << charge[0] << "," << charge[1] << std::endl;
-      if (recoverTwo) {
-        baseline=output_shower_v.begin()+indices[target];
-        excluded=std::move(hits[1-target]);
+      const int fragment=showerreco::recovery::detachedFragment(distances,charge,fDetachedDistance,
+        baselineUsable==2 ? fDetachedFraction : fThreeDetachedFraction);
+      bool disjoint=true;
+      for (std::size_t a=0; a<hits.size(); ++a) for (std::size_t b=a+1; b<hits.size(); ++b)
+        disjoint=disjoint && showerreco::recovery::disjointHits(hits[a],hits[b]);
+      recoverTwo=baselineUsable==2 && fragment>=0 && disjoint;
+      recoverThree=baselineUsable==3 && fragment>=0 && disjoint;
+      std::cout << "[SingleShowerRecovery] event " << e.id()
+        << " two_shower_eligible=" << recoverTwo << " three_shower_eligible=" << recoverThree
+        << " fragment=" << fragment << " start_distances=";
+      for (auto d : distances) std::cout << d << ",";
+      std::cout << " collection_charges=";
+      for (auto q : charge) std::cout << q << ",";
+      std::cout << std::endl;
+      if (recoverTwo || recoverThree) {
+        for (const auto& group : hits) originalHits.insert(originalHits.end(),group.begin(),group.end());
+        const auto addPlanes=[](RecoverySeed& seed, const HitList& group, std::vector<unsigned>* match) {
+          auto planes=showerreco::recovery::hitsByPlane(group,
+            [](const auto& hit) { return hit->WireID().Plane; });
+          for (auto& plane : planes) if (!plane.empty()) {
+            if (match) match->push_back(seed.clusters.size());
+            seed.clusters.push_back(showerreco::recovery::uniqueHitsInOrder(plane));
+          }
+        };
+        if (recoverTwo) {
+          baseline=output_shower_v.begin()+indices[1-fragment];
+          if (fCombineTwoShowers) {
+            RecoverySeed seed;
+            seed.coverageGroups=hits;
+            addPlanes(seed,originalHits,nullptr);
+            seeds.push_back(std::move(seed));
+          }
+        } else {
+          // Rank the two possible parents geometrically, then validate each
+          // attachment using the existing cross-plane matcher and mapped points.
+          std::vector<std::pair<double,std::size_t>> parents;
+          for (std::size_t parent=0; parent<hits.size(); ++parent) if (int(parent)!=fragment) {
+            const auto& main=output_shower_v[indices[parent]];
+            const auto delta=output_shower_v[indices[fragment]].fXYZStart-main.fXYZStart;
+            const double angle=showerreco::recovery::attachmentAngle(
+              {{main.fDCosStart.X(),main.fDCosStart.Y(),main.fDCosStart.Z()}},
+              {{delta.X(),delta.Y(),delta.Z()}});
+            std::cout << "[SingleShowerRecovery] event " << e.id() << " fragment_parent=" << parent
+              << " attachment_angle=" << angle << " geometry_pass=" << (angle<=fFragmentAttachmentAngle) << std::endl;
+            if (angle<=fFragmentAttachmentAngle) parents.push_back({angle,parent});
+          }
+          std::stable_sort(parents.begin(),parents.end());
+          for (const auto& parent : parents) {
+            RecoverySeed seed;
+            seed.mergeOnly=true; seed.coverageGroups=hits; seed.forcedMatches.resize(2);
+            unsigned m=0;
+            for (std::size_t main=0; main<hits.size(); ++main) if (int(main)!=fragment) {
+              HitList group=hits[main];
+              if (main==parent.second) group.insert(group.end(),hits[fragment].begin(),hits[fragment].end());
+              addPlanes(seed,group,&seed.forcedMatches[m++]);
+            }
+            seeds.push_back(std::move(seed));
+          }
+        }
       }
     }
   }
-  if (fRecovery && (baselineUsable==1 || recoverTwo)) {
-    auto recovered = fRecovery->run(e, fClusproducer, fVtxproducer,
-      pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser,
-      fSaveSplitCandidates ? &diagnostic : nullptr,false,
-      recoverTwo ? fRecoveredStartDistance : 0.,excluded);
+  if (fRecovery && (baselineUsable==1 || recoverTwo || recoverThree)) {
+    showerreco::recovery::RecoveryResult recovered;
+    showerreco::recovery::RecoveryBudget budget;
+    if (!seeds.empty()) {
+      for (std::size_t attempt=0; attempt<seeds.size(); ++attempt) {
+        std::cout << "[SingleShowerRecovery] event " << e.id() << " seed_attempt=" << attempt
+          << " recovery_mode=" << (seeds[attempt].mergeOnly ? "fragment_merge" : "combine_split") << std::endl;
+        recovered=fRecovery->run(e,fClusproducer,fVtxproducer,originalHits,fRecoveryCalibration,*_manager,gser,
+          fSaveSplitCandidates && !seeds[attempt].mergeOnly ? &diagnostic : nullptr,false,
+          fRecoveredStartDistance,&seeds[attempt],&budget);
+        if (recovered.showers.size()==2) break;
+      }
+    } else if (!recoverThree) {
+      recovered=fRecovery->run(e,fClusproducer,fVtxproducer,
+        recoverTwo ? originalHits : pfp_hit_assn_v.at(baseline->fIndex),fRecoveryCalibration,*_manager,gser,
+        fSaveSplitCandidates ? &diagnostic : nullptr,false,recoverTwo ? fRecoveredStartDistance : 0.);
+    }
     // Never replace a usable baseline by zero, one, or more than two showers.
     if (recovered.showers.size() == 2) {
       art::PtrMaker<recob::Cluster> makeCluster(e, "recovery");

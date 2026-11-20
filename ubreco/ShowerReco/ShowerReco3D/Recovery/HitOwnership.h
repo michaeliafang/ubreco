@@ -1,6 +1,7 @@
 #ifndef UBRECO_RECOVERY_HITOWNERSHIP_H
 #define UBRECO_RECOVERY_HITOWNERSHIP_H
 #include <set>
+#include <array>
 #include <vector>
 
 namespace showerreco {
@@ -17,6 +18,14 @@ template <class Hit> bool disjointHits(const std::vector<Hit>& a, const std::vec
   const std::set<Hit> first(a.begin(), a.end());
   for (const auto& hit : b) if (first.count(hit)) return false;
   return true;
+}
+// Combine supplied shower hits without recovering unrelated singleton clusters.
+// Deduplicate by complete hit identity before grouping by detector plane.
+template <class Hit, class PlaneOf>
+std::array<std::vector<Hit>,3> hitsByPlane(const std::vector<Hit>& hits, PlaneOf planeOf) {
+  std::array<std::vector<Hit>,3> result;
+  for (const auto& hit : uniqueHitsInOrder(hits)) result.at(planeOf(hit)).push_back(hit);
+  return result;
 }
 } // namespace recovery
 } // namespace showerreco

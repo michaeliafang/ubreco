@@ -17,5 +17,15 @@ int main() {
   CHECK(uniqueHitsInOrder(std::vector<Hit>{}).empty());
   CHECK(disjointHits(clean,std::vector<Hit>{}));
   CHECK(disjointHits(std::vector<Hit>{a,b},std::vector<Hit>{c}));
+  // Same input grouping used by combine/split and fragment/parent attachment.
+  const auto grouped=hitsByPlane(std::vector<Hit>{a,b,c,otherProduct,a},
+    [](const Hit& h) { return h.second%3; });
+  CHECK((grouped[0]==std::vector<Hit>{a,otherProduct}));
+  CHECK((grouped[1]==std::vector<Hit>{b}));
+  CHECK((grouped[2]==std::vector<Hit>{c}));
+  std::vector<Hit> combined;
+  for (const auto& plane : grouped) combined.insert(combined.end(),plane.begin(),plane.end());
+  CHECK(combined.size()==4); // detached-fragment hits and product identity retained
+  CHECK(disjointHits(grouped[0],grouped[1]));
   std::cout << "Hit ownership tests passed\n";
 }

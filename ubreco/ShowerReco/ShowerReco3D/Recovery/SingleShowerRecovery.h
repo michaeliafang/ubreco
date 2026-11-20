@@ -36,6 +36,15 @@ struct RecoveryResult {
   std::vector<Shower_t> showers;
 };
 
+// A seed contains only hits belonging to the baseline showers, grouped by plane.
+// Forced matches preserve the two main showers when attaching a third fragment.
+struct RecoverySeed {
+  std::vector<HitList> clusters;
+  ClusterMatches forcedMatches;
+  std::vector<HitList> coverageGroups;
+  bool mergeOnly=false;
+};
+
 // Mirrors the pre-publication validity checks in ShrReco3D::SaveShower.
 inline bool usableShower(const Shower_t& s) {
   return s.fPassedReconstruction && s.fXYZStart.Mag2() != 0. && s.fDCosStart.Mag2() != 0.;
@@ -72,6 +81,12 @@ public:
     if (!std::isfinite(minPointWeight_) || minPointWeight_<=0. ||
         !std::isfinite(maxPointConflict_) || maxPointConflict_<0. || maxPointConflict_>1.)
       throw std::invalid_argument("Invalid spacepoint consistency configuration");
+    searchSubstantialPairs_ = p.get<bool>("SearchSubstantialClusterPairs",false);
+    maxPairClusters_ = p.get<unsigned>("MaxPairClustersPerPlane",3);
+    minPairChargeCoverage_ = p.get<double>("MinPairPlaneChargeCoverage",0.8);
+    if (maxPairClusters_<2 || maxPairClusters_>4 || !std::isfinite(minPairChargeCoverage_) ||
+        minPairChargeCoverage_<=0. || minPairChargeCoverage_>1.)
+      throw std::invalid_argument("Invalid substantial cluster search configuration");
     allowTwoPlaneFallback_ = p.get<bool>("AllowTwoPlaneFallback",false);
     minTwoPlaneWeight_ = p.get<double>("MinTwoPlaneShowerWeight",3.);
     if (!std::isfinite(minTwoPlaneWeight_) || minTwoPlaneWeight_<=0.)
@@ -98,7 +113,11 @@ public:
                      const HitList& originalHits, const std::vector<double>& calibration,
                      ShrRecoManager& reco, const util::GeometryUtilities& geometry,
                      RecoveryResult* diagnostic = nullptr, bool diagnosticOnly = false,
-                     double maxOutputStartDistance = 0., const HitList& excludedHits = {}) {
+                     double maxOutputStartDistance = 0., const RecoverySeed* seed = nullptr,
+                     RecoveryBudget* sharedBudget = nullptr) {
+    RecoveryBudget localBudget;
+    auto& budget=sharedBudget ? *sharedBudget : localBudget;
+    const bool mergeOnly=seed && seed->mergeOnly;
     const auto started = std::chrono::steady_clock::now();
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
     std::size_t duplicatesRemoved = 0, overlappingInputHits = 0, ownershipRejected = 0;
@@ -110,6 +129,7 @@ public:
         << " coverage_rejected=" << coverageRejected << " contribution_rejected=" << contributionRejected
         << " duplicates_removed=" << duplicatesRemoved << " overlapping_input_hits=" << overlappingInputHits
         << " ownership_rejected=" << ownershipRejected
+        << " event_match_trials=" << budget.trials << " event_reco_showers=" << budget.showers
         << " budget_skipped=" << budgetSkipped << " recovery_ms=" << ms << std::endl;
     };
     RecoveryResult none;
@@ -140,15 +160,11 @@ public:
     std::array<std::vector<Candidate>, 3> candidates;
     std::vector<HitList> allHits;
     std::set<art::Ptr<recob::Hit>> uniqueHits;
-    const std::set<art::Ptr<recob::Hit>> excluded(excludedHits.begin(),excludedHits.end());
-    for (std::size_t c = 0; c < clusters->size(); ++c) {
-      const auto inputHits = associations.at(c);
+    for (std::size_t c = 0; c < (seed ? seed->clusters.size() : clusters->size()); ++c) {
+      const auto inputHits = seed ? seed->clusters.at(c) : associations.at(c);
       allHits.push_back(uniqueHitsInOrder(inputHits));
       duplicatesRemoved += inputHits.size()-allHits.back().size();
-      auto& retainedHits = allHits.back();
-      retainedHits.erase(std::remove_if(retainedHits.begin(),retainedHits.end(),
-        [&](const auto& hit) { return excluded.count(hit); }),retainedHits.end());
-      const auto& hits = retainedHits;
+      const auto& hits = allHits.back();
       if (hits.empty()) continue;
       const unsigned int plane = hits.front()->WireID().Plane;
       if (plane >= 3) { report("invalid_plane"); return none; }
@@ -167,6 +183,7 @@ public:
         const double vt = vertex.X() + trigger_offset(clock)*time2cm + plane*0.3;
         points.push_back({h->WireID().Wire*wire2cm-vw, h->PeakTime()*time2cm-vt, h->Integral()});
       }
+      if (mergeOnly) continue;
       SplitDiagnostics diagnostics;
       auto split = splitAtVertex(points, cfg_, &diagnostics);
       if (points.size() >= 2*cfg_.minHits)
@@ -224,12 +241,14 @@ public:
       return std::count_if(a.begin(),a.end(),[](auto x){return x!=0;}) >
              std::count_if(b.begin(),b.end(),[](auto x){return x!=0;});
     });
+    if (mergeOnly) combinations.push_back({{0,0,0}});
     for (const auto& choices : combinations) {
-          if (trials >= maxMatchTrials_ || maxRecoShowers_-recoShowers < 2) {
+          if (!budget.canTry(maxMatchTrials_,maxRecoShowers_)) {
             budgetSkipped += combinations.size()-trials;
             break;
           }
           ++trials;
+          ++budget.trials;
           std::map<std::size_t, const Split*> selected;
           for (std::size_t pl = 0; pl < 3; ++pl) if (choices[pl]) {
             const auto& candidate = candidates[pl][choices[pl]-1];
@@ -254,12 +273,18 @@ public:
           std::vector<cluster::Cluster> cmClusters;
           for (const auto& hits : trial.clusterHits)
             cmClusters.push_back(appendCluster(trial,hits));
-          matcher_.Reset();
-          matcher_.SetClusters(cmClusters);
-          matcher_.Process();
-          const auto initialMatches = matcher_.GetBookKeeper().GetResult();
+          ClusterMatches initialMatches;
+          if (mergeOnly) initialMatches=seed->forcedMatches;
+          else {
+            matcher_.Reset();
+            matcher_.SetClusters(cmClusters);
+            matcher_.Process();
+            initialMatches=matcher_.GetBookKeeper().GetResult();
+          }
           const auto& matches = initialMatches;
-          if (matches.size() < 2) continue;
+          std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+            << " initial_match_groups=" << matches.size() << std::endl;
+          if (matches.size()<2 && !(useSpacePoints_ && searchSubstantialPairs_ && !mergeOnly)) continue;
           ++matched;
           const auto assignedFor = [&](const ClusterMatches& hypothesis) {
             std::map<art::Ptr<recob::Hit>,unsigned int> ownership;
@@ -298,17 +323,58 @@ public:
           unsigned initialPlaneMask=0;
           for (const auto& match : initialMatches) for (auto ci : match) initialPlaneMask|=1u<<planes.at(ci);
           std::vector<MatchHypothesis> hypotheses{{initialMatches,initialPlaneMask,0}};
-          if (useSpacePoints_ && tryAlternativePairings_) {
+          if (!mergeOnly && useSpacePoints_ && tryAlternativePairings_) {
             const auto alternatives=pairingHypotheses(initialMatches,planes);
             for (const auto& h : alternatives) if (h.swapMask) hypotheses.push_back(h);
           }
-          if (useSpacePoints_ && allowTwoPlaneFallback_) {
+          if (!mergeOnly && useSpacePoints_ && allowTwoPlaneFallback_) {
             const auto fallback=twoPlaneHypotheses(initialMatches,planes,tryAlternativePairings_);
             hypotheses.insert(hypotheses.end(),fallback.begin(),fallback.end());
+          }
+          if (!mergeOnly && useSpacePoints_ && searchSubstantialPairs_ && allowTwoPlaneFallback_) {
+            std::vector<std::size_t> counts;
+            std::vector<double> charges;
+            for (const auto& hits : trial.clusterHits) {
+              counts.push_back(hits.size());
+              double charge=0.;
+              for (const auto& hit : hits) {
+                const double q=hit->Integral();
+                if (!std::isfinite(q)) { charge=q; break; }
+                charge+=std::max(0.,q);
+              }
+              charges.push_back(charge);
+            }
+            const auto extra=substantialPairHypotheses(planes,counts,charges,cfg_.minHits,
+              maxPairClusters_,minPairChargeCoverage_);
+            for (const auto& h : extra) {
+              // Avoid spending reconstruction budget twice on the same pairing,
+              // even if its two shower labels or cluster order are reversed.
+              const auto canonical=[](ClusterMatches m) {
+                for (auto& group : m) std::sort(group.begin(),group.end());
+                std::sort(m.begin(),m.end()); return m;
+              };
+              const auto key=canonical(h.matches);
+              bool duplicate=false;
+              for (const auto& existing : hypotheses)
+                if (canonical(existing.matches)==key) { duplicate=true; break; }
+              if (!duplicate) hypotheses.push_back(h);
+            }
           }
           struct ScoredHypothesis { MatchHypothesis hypothesis; PointConsistency score; };
           std::vector<ScoredHypothesis> scored;
           for (const auto& h : hypotheses) {
+            if (h.matches.size()<2) continue;
+            if (h.clusterSearch) {
+              bool contributes=false;
+              for (const auto& children : splitChildren) {
+                const auto in=[&](unsigned m,std::size_t c) {
+                  return std::find(h.matches[m].begin(),h.matches[m].end(),c)!=h.matches[m].end();
+                };
+                contributes=contributes || (in(0,children[0]) && in(1,children[1])) ||
+                  (in(1,children[0]) && in(0,children[1]));
+              }
+              if (!contributes) continue;
+            }
             // Alternative assignments must still satisfy the configured matching
             // tool, and no hypothesis may assign a hit to multiple showers.
             bool compatible=true;
@@ -321,7 +387,7 @@ public:
                 own.insert(trial.clusterHits.at(ci).begin(),trial.clusterHits.at(ci).end());
               }
               for (const auto& hit : own) if (!used.insert(hit).second && h.matches.size()==2) compatible=false;
-              if (h.swapMask || h.twoPlaneFallback) {
+              if (mergeOnly || h.swapMask || h.twoPlaneFallback) {
                 pairingTool_->Reset();
                 const double value=pairingTool_->Float(cl);
                 if (!std::isfinite(value) || value<0.) compatible=false;
@@ -331,9 +397,9 @@ public:
             const auto assigned=assignedFor(h.matches);
             const auto score=pointConsistency(assigned);
             bool supported=true;
-            if (h.twoPlaneFallback) {
+            if (mergeOnly || h.twoPlaneFallback) {
               const auto support=consistentShowerWeights(assigned);
-              supported=score.weight>=minPointWeight_ && support[0]>=minTwoPlaneWeight_ && support[1]>=minTwoPlaneWeight_;
+              supported=useSpacePoints_ && score.weight>=minPointWeight_ && support[0]>=minTwoPlaneWeight_ && support[1]>=minTwoPlaneWeight_;
               std::array<std::array<double,3>,2> charge{};
               for (unsigned m=0; m<2; ++m) for (auto ci : h.matches[m]) {
                 const auto& hits=trial.clusterHits.at(ci);
@@ -366,10 +432,28 @@ public:
           std::stable_sort(scored.begin(),scored.end(),[](const auto& a,const auto& b) {
             if (a.hypothesis.twoPlaneFallback!=b.hypothesis.twoPlaneFallback)
               return !a.hypothesis.twoPlaneFallback;
+            if (a.hypothesis.clusterSearch!=b.hypothesis.clusterSearch)
+              return !a.hypothesis.clusterSearch;
+            if (a.hypothesis.clusterSearch && b.hypothesis.clusterSearch &&
+                a.hypothesis.selectedHits!=b.hypothesis.selectedHits)
+              return a.hypothesis.selectedHits>b.hypothesis.selectedHits;
             return a.score.fraction()<b.score.fraction();
           });
           for (const auto& option : scored) {
             const auto& matches=option.hypothesis.matches;
+            if (option.hypothesis.clusterSearch) {
+              std::set<unsigned> selectedClusters;
+              for (const auto& match : matches) selectedClusters.insert(match.begin(),match.end());
+              std::size_t unusedHits=0, unusedClusters=0;
+              for (unsigned ci=0; ci<trial.clusterHits.size(); ++ci)
+                if ((option.hypothesis.planeMask&(1u<<planes[ci])) && !selectedClusters.count(ci)) {
+                  ++unusedClusters; unusedHits+=trial.clusterHits[ci].size();
+                }
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " substantial_pair_search=1 selected_clusters=";
+              for (auto ci : selectedClusters) std::cout << ci << ",";
+              std::cout << " unused_retained_plane_clusters=" << unusedClusters
+                << " unused_hit_associations=" << unusedHits << std::endl;
+            }
             trial.matches.clear();
             trial.showers.clear();
             std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
@@ -377,8 +461,9 @@ public:
               << " retained_plane_mask=" << option.hypothesis.planeMask
               << " two_plane_fallback=" << option.hypothesis.twoPlaneFallback << std::endl;
             // Never truncate a match set: that could hide a third usable shower.
-            if (matches.size() > maxRecoShowers_-recoShowers) { ++budgetSkipped; continue; }
+            if (!budget.canReconstruct(matches.size(),maxRecoShowers_)) { ++budgetSkipped; continue; }
             recoShowers += matches.size();
+            budget.showers += matches.size();
             std::vector<protoshower::ProtoShower> protos;
             for (const auto& match : matches) {
               protoshower::ProtoShower proto;
@@ -452,9 +537,25 @@ public:
             std::cout << "[SingleShowerRecovery] event " << e.id() << " coverage_retained=" << retained
               << " coverage_considered=" << considered << " coverage_omitted=" << original.size()-considered << std::endl;
             if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
+            // Require coverage of every original shower separately: a small
+            // fragment must not disappear behind good aggregate coverage.
+            bool groupCoverage=true;
+            if (seed) for (std::size_t g=0; g<seed->coverageGroups.size(); ++g) {
+              const auto unique=uniqueHitsInOrder(seed->coverageGroups[g]);
+              std::size_t n=0, kept=0;
+              for (const auto& hit : unique) {
+                if (option.hypothesis.twoPlaneFallback &&
+                    !(option.hypothesis.planeMask&(1u<<hit->WireID().Plane))) continue;
+                ++n; kept+=recovered.count(hit);
+              }
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " coverage_group=" << g
+                << " retained=" << kept << " considered=" << n << std::endl;
+              if (!n || double(kept)/n<minCoverage_) groupCoverage=false;
+            }
+            if (!groupCoverage) { ++coverageRejected; continue; }
             // A split must actually contribute both pieces to the accepted pair.
             // Otherwise unrelated unmatched fragments could masquerade as recovery.
-            bool contributes = false;
+            bool contributes = mergeOnly;
             for (const auto& children : splitChildren) {
               const auto contains = [&](std::size_t shower, std::size_t child) {
                 const auto& match = trial.matches[shower];
@@ -475,6 +576,9 @@ private:
   bool useSpacePoints_;
   bool tryAlternativePairings_;
   bool allowTwoPlaneFallback_;
+  bool searchSubstantialPairs_;
+  unsigned maxPairClusters_;
+  double minPairChargeCoverage_;
   double minTwoPlaneWeight_;
   std::unique_ptr<clusmtool::CFloatAlgoBase> pairingTool_;
   art::InputTag spacePointTag_, spacePointHitTag_;

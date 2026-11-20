@@ -112,7 +112,7 @@ of physical correspondence. Zero conflict with zero weight means no evidence.
 None of these diagnostics changes the existing aggregate conflict veto. Their
 additional work is linear in assigned associations per fixed diagnostic pass.
 
-## Independently switchable multi-shower recovery
+## Initial independently switchable multi-shower recovery (historical)
 
 `RecoverTwoShowers` enables replacement only for exactly two usable baseline
 showers with disjoint hit lists: one starts >20 cm from the reconstructed vertex
@@ -122,7 +122,7 @@ fails eligibility. Using only collection charge avoids summing unequal view
 coverage. These distances and fractions are configurable. No inference is made
 from cone length or display angle.
 
-The detached shower's hits are excluded from trial inputs. Coverage is measured
+In the initial implementation (superseded by the combine/merge update below), the detached shower's hits were excluded from trial inputs. Coverage is measured
 against the remaining baseline shower. A successful replacement must have two
 usable, disjoint showers, both with 3D starts <=5 cm from the vertex, and must use
 both daughters of an actual split. Failed recovery preserves every baseline
@@ -151,6 +151,9 @@ which used 1/2 to mean planes 1/2); `reconstruct_swap_mask` records the choice.
 The original pairing remains the sparse-evidence fallback.
 
 ## Supported two-plane fallback
+
+This describes the original exactly-two-group fallback. The independent
+substantial-cluster search below extends this to other matcher group counts.
 
 `AllowTwoPlaneFallback` tries collection+plane0 or collection+plane1 subsets of
 exactly two matched candidates; it never drops an entire third matched shower.
@@ -183,14 +186,15 @@ are inactive. A low conflict score still is not proof of correct reconstruction.
 For independent comparisons, override these under
 `physics.producers.showersplittest.SingleShowerRecovery`:
 `RecoverTwoShowers`, `TryAlternativePairings`, `AllowTwoPlaneFallback`, and
-`DiagnoseThreeShowers`. Set false to disable each; setting all four false restores
-the previous selection features (additional diagnostics can remain). Reverting
+`DiagnoseThreeShowers`. For the combine/merge update below, also disable
+`RecoverThreeShowers` and `SearchSubstantialClusterPairs`; disabling
+`RecoverTwoShowers` also disables combine-then-split. Reverting
 commits is an alternative, in reverse dependency order; do not rewrite history.
 
 Suggested GPVM checks: 616 preserves its successful recovery; 650 exercises
 pairing changes; 602 exercises retained planes 1+2; 614/4881/4890 exercise eligible
 two-shower recovery if they satisfy the explicit charge/distance cuts; 4867 gets
-candidates but its three baseline showers stay intact; 4901 reports the failed
+candidates (and now tests fragment attachment when `RecoverThreeShowers` is enabled); 4901 reports the failed
 reconstruction tool. Event displays alone do not establish eligibility fractions.
 785 still cannot borrow singleton start hits: fragment handling, induction-streak
 suppression and induction-only reconstruction remain deferred. No cmerger edits.
@@ -199,3 +203,65 @@ Local validation used all four standalone tests with C++17, -O2, -DNDEBUG,
 -Wall -Wextra -Werror -pedantic. These validate helper logic; they do not compile
 art/LArSoft integration or demonstrate physics performance. No claim about full
 job runtime or successful reconstruction is possible until GPVM testing.
+
+
+## Combine/split, three-shower attachment, and substantial-cluster search
+
+The current experimental FCL enables three independently switchable additions:
+
+- `CombineTwoShowerHits`: for eligible two-shower events, combine **both** baseline
+  showers' associated hits into one deduplicated cluster per plane, then apply the
+  existing splitter. Eligibility remains a detached start strictly beyond 20 cm
+  with strictly less than 30% of total positive collection charge, and the other
+  shower within 20 cm. No detached hits are excluded. `MinOriginalHitFraction`
+  (0.8) is checked for each baseline shower separately as well as their union.
+  For an accepted two-plane fallback, coverage uses only retained planes and
+  omitted hits are logged. Switching this off uses ordinary cmerger inputs with
+  aggregate coverage of both showers; switch `RecoverTwoShowers` off to disable
+  two-shower replacement entirely.
+- `RecoverThreeShowers`: exactly one detached shower must be beyond 20 cm and
+  below `ThreeShowerMaxFragmentChargeFraction` (0.20), with both others within
+  20 cm. Try attaching all fragment hits to either main shower, grouped by plane.
+  Rank parents by the angle from the main shower direction to the fragment start;
+  require at most `MaxFragmentAttachmentAngle` (35 degrees). This is a tunable
+  geometric criterion, not a validated physics threshold. Keep main assignments
+  fixed: no splitting, swapping main identities, or dropping a plane in this path.
+  Require the configured matching tool, mapped-spacepoint support for both
+  showers, the conflict cut, per-plane charge balance, per-original-shower hit
+  coverage, and two usable reconstructed showers starting within 5 cm. If neither
+  attachment passes, preserve the original three showers. `DiagnoseThreeShowers`
+  still writes split diagnostics from the original cmerger inputs independently;
+  those diagnostic clusters are not the attachment hypotheses.
+- `SearchSubstantialClusterPairs`: permit collection-plus-induction matching
+  independent of how many groups the original matcher returned. Consider the top
+  `MaxPairClustersPerPlane` (3) clusters by hit count, with charge as a tie-breaker.
+  Choose two per plane and test both assignments: at most 36 lightweight options
+  per split trial. Each pair must retain `MinPairPlaneChargeCoverage` (0.80) of
+  positive charge in **each retained plane**, measured against all clusters with
+  at least `MinHits`, even those outside the top-three cap. Overlapping input
+  clusters can make this denominator conservative. Require both split daughters
+  to contribute, disjoint hit ownership, existing matcher/spacepoint/support/
+  charge-balance checks, and original-hit coverage. Existing matching hypotheses
+  are tried first; extra options prioritize selected hit count, then conflict.
+  Logs show original group count and unused retained-plane cluster/hit counts.
+
+The common event budget stays at four matching trials and four additional
+reconstructed proto-showers, shared by both possible fragment-parent attempts.
+This bounds reconstruction work, not wall time; measure timing on GPVM. No change
+was made to singleton near-vertex evidence, dead-wire handling, induction-only
+reconstruction, or `FilterShowers` angle cuts. Product labels remain unchanged.
+
+All three additions default off in C++ and are enabled in the experimental FCL.
+For isolated comparisons, toggle `CombineTwoShowerHits`, `RecoverThreeShowers`,
+and `SearchSubstantialClusterPairs` separately. Standalone tests cover strict
+eligibility boundaries, invalid inputs, attachment angles, shared budgets,
+hit conservation/deduplication, both pairing assignments with extra groups,
+charge coverage beyond the search cap, and the bounded option count. They do not
+compile the art module or validate real event physics.
+
+GPVM checks: run 5512/97/4867 for three-shower attachment and 5512/96/4827 for
+independent plane-pair selection; compare 12/602, 12/614, 12/616, 97/4881, and
+97/4890 against the visually successful previous output. Inspect `recovery_mode`,
+`fragment_parent`, `attachment_angle`, `initial_match_groups`,
+`substantial_pair_search`, `coverage_group`, `event_reco_showers`, and `status`.
+The source builds and event outcomes still require GPVM validation.
