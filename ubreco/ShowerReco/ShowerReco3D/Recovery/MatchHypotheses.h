@@ -8,6 +8,7 @@ using ClusterMatches = std::vector<std::vector<unsigned int>>;
 struct MatchHypothesis {
   ClusterMatches matches;
   unsigned planeMask = 7, swapMask = 0;
+  bool twoPlaneFallback = false;
 };
 // Only permute an unambiguous pair with exactly one cluster per represented
 // plane per shower. Fix the first plane's ordering to remove global relabeling.
@@ -35,5 +36,28 @@ inline std::vector<MatchHypothesis> pairingHypotheses(const ClusterMatches& matc
   }
   return result;
 }
+inline std::vector<MatchHypothesis> twoPlaneHypotheses(const ClusterMatches& matches,
+                                                      const std::vector<unsigned>& planes,
+                                                      bool allowSwaps) {
+  if (matches.size()!=2) return {};
+  std::vector<MatchHypothesis> result;
+  for (unsigned mask : {5u,6u}) { // collection + one induction plane only
+    ClusterMatches retained(2);
+    bool omitted=false;
+    for (unsigned s=0; s<2; ++s) for (auto ci : matches[s]) {
+      if (ci>=planes.size() || planes[ci]>=3) return {};
+      if (mask&(1u<<planes[ci])) retained[s].push_back(ci);
+      else omitted=true;
+    }
+    if (!omitted) continue; // already a two-plane match, not a fallback
+    for (auto h : pairingHypotheses(retained,planes)) {
+      if (h.planeMask!=mask || (!allowSwaps && h.swapMask)) continue;
+      h.twoPlaneFallback=true;
+      result.push_back(h);
+    }
+  }
+  return result;
+}
+
 } }
 #endif

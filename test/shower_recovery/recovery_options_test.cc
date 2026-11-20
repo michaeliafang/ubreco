@@ -25,5 +25,20 @@ int main() {
   CHECK(pairingHypotheses({{0,1},{0,4}},planes).empty());
   CHECK(pairingHypotheses({{0,3},{1,4}},planes).empty());
   CHECK(pairingHypotheses({{0,1},{3,4},{2,5}},planes).empty());
+  const auto fallback=twoPlaneHypotheses(base,planes,true);
+  CHECK(fallback.size()==4);
+  for (const auto& h : fallback) {
+    CHECK(h.twoPlaneFallback && (h.planeMask==5 || h.planeMask==6));
+    CHECK(h.matches[0].size()==2 && h.matches[1].size()==2);
+    for (const auto& match : h.matches) {
+      bool collection=false;
+      for (auto ci : match) collection=collection || planes[ci]==2;
+      CHECK(collection);
+    }
+  }
+  CHECK(twoPlaneHypotheses(base,planes,false).size()==2);
+  CHECK(twoPlaneHypotheses({{0,1},{3,4}},planes,true).empty());
+  CHECK(twoPlaneHypotheses({{0,2},{3,5}},planes,true).empty());
+  CHECK(twoPlaneHypotheses({{0,1,2},{3,4,5},{6}},planes,true).empty());
   std::cout << "Recovery option tests passed\n";
 }

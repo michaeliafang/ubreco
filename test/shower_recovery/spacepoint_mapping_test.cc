@@ -44,5 +44,12 @@ int main() {
   CHECK(diagnosePoints(repeated,true).unique.informative==1);
   CHECK(diagnosePoints({},true).unique.weight==0.);
   CHECK(pointConsistency(evidence).fraction()==1.); // diagnostics leave input untouched
+  const auto support=consistentShowerWeights({{{0,0,0},{1,2,0}},{{2,1,1},{3,2,1}}});
+  CHECK(support[0]==1. && support[1]==1.);
+  const auto reused=consistentShowerWeights({{{0,0,0},{1,2,0}},{{0,0,0},{1,2,0}}});
+  CHECK(reused[0]==1. && reused[1]==0.);
+  const auto inconsistent=consistentShowerWeights({{{0,0,0},{1,2,1}}});
+  CHECK(inconsistent[0]==0. && inconsistent[1]==0.);
+  CHECK(consistentShowerWeights({{{0,0,0},{1,0,0}}})[0]==0.);
   std::cout << "Spacepoint mapping and consistency tests passed\n";
 }

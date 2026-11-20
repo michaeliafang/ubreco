@@ -149,3 +149,25 @@ to force a two-shower result. With UseSpacePoints false, alternatives are disabl
 `pairing_swap_mask` uses plane bits 1/2/4 (unlike the old diagnostic flip mask,
 which used 1/2 to mean planes 1/2); `reconstruct_swap_mask` records the choice.
 The original pairing remains the sparse-evidence fallback.
+
+## Supported two-plane fallback
+
+`AllowTwoPlaneFallback` tries collection+plane0 or collection+plane1 subsets of
+exactly two matched candidates; it never drops an entire third matched shower.
+Each retained plane must have exactly one cluster per shower, >=MinHits hits per
+cluster, and each shower must carry >=MinChargeFraction of that plane's pair
+charge. The configured matching tool must accept each pair. Spacepoint conflict
+must pass with >=MinSpacePointWeight overall, and EACH shower must have
+>=MinTwoPlaneShowerWeight consistent point weight (default 3). Multiplicity
+weights are computed before separating showers. Missing evidence cannot count
+as agreement. Induction-only reconstruction is not enabled.
+
+Within each splitting trial, full-view hypotheses precede two-plane fallbacks;
+within each group, lower conflict ranks first. All trials/options share the
+existing reconstruction budget, so a fallback is not guaranteed to be reached
+if earlier reconstructions exhaust it. Coverage uses only original hits in the
+retained planes for fallback; logs report considered, retained and omitted hit
+counts. The omitted plane is not assigned to the recovered showers. Source
+clusters and diagnostic products remain available. Pairing alternatives and
+fallback can each be disabled independently; with UseSpacePoints false both
+are inactive. A low conflict score still is not proof of correct reconstruction.

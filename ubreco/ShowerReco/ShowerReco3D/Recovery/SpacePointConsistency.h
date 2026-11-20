@@ -39,6 +39,29 @@ inline PointConsistency pointConsistency(const std::vector<std::vector<AssignedP
   }
   return result;
 }
+// Bilateral support uses global multiplicities before separating showers, so
+// reused hits cannot become stronger evidence just by selecting a subset.
+inline std::array<double,2> consistentShowerWeights(
+    const std::vector<std::vector<AssignedPointHit>>& points) {
+  std::map<std::size_t,std::size_t> uses;
+  for (const auto& point : points) for (const auto& h : point) ++uses[h.hit];
+  std::array<double,2> result{};
+  for (const auto& point : points) {
+    if (point.empty()) continue;
+    const auto label=point.front().shower;
+    if (label>=2) continue;
+    unsigned planes=0; double weight=1.; bool consistent=true;
+    for (const auto& h : point) {
+      if (h.plane>=3 || h.shower!=label) { consistent=false; break; }
+      planes|=1u<<h.plane;
+      const double w=1./uses.at(h.hit);
+      if (w<weight) weight=w;
+    }
+    if (consistent && (planes&(planes-1))) result[label]+=weight;
+  }
+  return result;
+}
+
 struct PointDiagnostics {
   std::array<PointConsistency,3> pairs; // 01, 02, 12; independently normalized
   PointConsistency unique;

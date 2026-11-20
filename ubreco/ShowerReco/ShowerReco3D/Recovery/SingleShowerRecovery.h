@@ -71,6 +71,10 @@ public:
     if (!std::isfinite(minPointWeight_) || minPointWeight_<=0. ||
         !std::isfinite(maxPointConflict_) || maxPointConflict_<0. || maxPointConflict_>1.)
       throw std::invalid_argument("Invalid spacepoint consistency configuration");
+    allowTwoPlaneFallback_ = p.get<bool>("AllowTwoPlaneFallback",false);
+    minTwoPlaneWeight_ = p.get<double>("MinTwoPlaneShowerWeight",3.);
+    if (!std::isfinite(minTwoPlaneWeight_) || minTwoPlaneWeight_<=0.)
+      throw std::invalid_argument("Invalid two-plane support threshold");
     tryAlternativePairings_ = p.get<bool>("TryAlternativePairings",false);
     pairingTool_ = art::make_tool<clusmtool::CFloatAlgoBase>(p.get<fhicl::ParameterSet>("MatchTool"));
     maxMatchTrials_ = p.get<unsigned int>("MaxMatchTrials", 4);
@@ -290,10 +294,16 @@ public:
           }
           std::vector<unsigned> planes;
           for (const auto& cl : trial.clusters) planes.push_back(cl.Plane().Plane);
-          std::vector<MatchHypothesis> hypotheses{{initialMatches,7,0}};
+          unsigned initialPlaneMask=0;
+          for (const auto& match : initialMatches) for (auto ci : match) initialPlaneMask|=1u<<planes.at(ci);
+          std::vector<MatchHypothesis> hypotheses{{initialMatches,initialPlaneMask,0}};
           if (useSpacePoints_ && tryAlternativePairings_) {
             const auto alternatives=pairingHypotheses(initialMatches,planes);
             for (const auto& h : alternatives) if (h.swapMask) hypotheses.push_back(h);
+          }
+          if (useSpacePoints_ && allowTwoPlaneFallback_) {
+            const auto fallback=twoPlaneHypotheses(initialMatches,planes,tryAlternativePairings_);
+            hypotheses.insert(hypotheses.end(),fallback.begin(),fallback.end());
           }
           struct ScoredHypothesis { MatchHypothesis hypothesis; PointConsistency score; };
           std::vector<ScoredHypothesis> scored;
@@ -309,8 +319,8 @@ public:
                 cl.push_back(&cmClusters.at(ci));
                 own.insert(trial.clusterHits.at(ci).begin(),trial.clusterHits.at(ci).end());
               }
-              for (const auto& hit : own) if (!used.insert(hit).second) compatible=false;
-              if (h.swapMask) {
+              for (const auto& hit : own) if (!used.insert(hit).second && h.matches.size()==2) compatible=false;
+              if (h.swapMask || h.twoPlaneFallback) {
                 pairingTool_->Reset();
                 const double value=pairingTool_->Float(cl);
                 if (!std::isfinite(value) || value<0.) compatible=false;
@@ -319,107 +329,142 @@ public:
             if (!compatible) continue;
             const auto assigned=assignedFor(h.matches);
             const auto score=pointConsistency(assigned);
+            bool supported=true;
+            if (h.twoPlaneFallback) {
+              const auto support=consistentShowerWeights(assigned);
+              supported=score.weight>=minPointWeight_ && support[0]>=minTwoPlaneWeight_ && support[1]>=minTwoPlaneWeight_;
+              std::array<std::array<double,3>,2> charge{};
+              for (unsigned m=0; m<2; ++m) for (auto ci : h.matches[m]) {
+                const auto& hits=trial.clusterHits.at(ci);
+                if (hits.size()<cfg_.minHits) supported=false;
+                for (const auto& hit : hits) {
+                  const double q=hit->Integral();
+                  if (!std::isfinite(q)) supported=false;
+                  charge[m][planes[ci]]+=std::max(0.,q);
+                }
+              }
+              for (unsigned pl=0; pl<3; ++pl) if (h.planeMask&(1u<<pl)) {
+                const double total=charge[0][pl]+charge[1][pl];
+                if (!std::isfinite(total) || total<=0. ||
+                    std::min(charge[0][pl],charge[1][pl])<cfg_.minChargeFraction*total) supported=false;
+              }
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+                << " fallback_plane_mask=" << h.planeMask << " fallback_swap_mask=" << h.swapMask
+                << " shower_sps_weights=" << support[0] << "," << support[1]
+                << " two_plane_supported=" << supported << std::endl;
+            }
             const bool reject=useSpacePoints_ && score.weight>=minPointWeight_ && score.fraction()>maxPointConflict_;
             std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
               << " pairing_swap_mask=" << h.swapMask << " plane_mask=" << h.planeMask
               << " sps_weight=" << score.weight << " sps_conflict=" << score.fraction()
               << " sps_reject=" << reject << std::endl;
             // Sparse points do not justify changing the original pairing.
-            if (reject || (h.swapMask && score.weight<minPointWeight_)) continue;
+            if (!supported || reject || (h.swapMask && score.weight<minPointWeight_)) continue;
             scored.push_back({h,score});
           }
           std::stable_sort(scored.begin(),scored.end(),[](const auto& a,const auto& b) {
+            if (a.hypothesis.twoPlaneFallback!=b.hypothesis.twoPlaneFallback)
+              return !a.hypothesis.twoPlaneFallback;
             return a.score.fraction()<b.score.fraction();
           });
           for (const auto& option : scored) {
-          const auto& matches=option.hypothesis.matches;
-          trial.matches.clear();
-          trial.showers.clear();
-          std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
-            << " reconstruct_swap_mask=" << option.hypothesis.swapMask << std::endl;
-          // Never truncate a match set: that could hide a third usable shower.
-          if (matches.size() > maxRecoShowers_-recoShowers) { ++budgetSkipped; continue; }
-          recoShowers += matches.size();
-          std::vector<protoshower::ProtoShower> protos;
-          for (const auto& match : matches) {
-            protoshower::ProtoShower proto;
-            proto.Reset();
-            proto._index = protos.size();
-            proto._vertex = TVector3(vertex.X(),vertex.Y(),vertex.Z());
-            proto.hasVertex(true);
-            for (auto index : match) {
-              const auto& cl = trial.clusters.at(index);
-              cluster2d::Cluster2D twoD{};
-              twoD._plane = cl.Plane().Plane;
-              twoD._angle_2d = cl.StartAngle();
-              twoD._opening_angle = 0.;
-              twoD._start = util::PxHit(twoD._plane, cl.StartWire()*wire2cm,
-                (cl.StartTick()-trigger_offset(clock))*time2cm,0.,0.,0.);
-              twoD._end = util::PxHit(twoD._plane, cl.EndWire()*wire2cm,
-                (cl.EndTick()-trigger_offset(clock))*time2cm,0.,0.,0.);
-              for (const auto& hit : trial.clusterHits.at(index)) {
-                const double energy = hit->Integral()*calibration.at(twoD._plane);
-                twoD._hits.emplace_back(twoD._plane,hit->WireID().Wire*wire2cm,
-                  (hit->PeakTime()-trigger_offset(clock))*time2cm,energy,energy,hit->PeakAmplitude());
-              }
-              proto._clusters.push_back(std::move(twoD));
-            }
-            proto.hasCluster2D(!proto._clusters.empty());
-            protos.push_back(std::move(proto));
-          }
-          reco.SetProtoShowers(protos);
-          std::vector<Shower_t> reconstructed;
-          reco.Reconstruct(geometry, reconstructed);
-          for (const auto& shower : reconstructed) {
+            const auto& matches=option.hypothesis.matches;
+            trial.matches.clear();
+            trial.showers.clear();
             std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
-              << " reco_candidate=" << shower.fIndex << " passed=" << shower.fPassedReconstruction
-              << " start_mag2=" << shower.fXYZStart.Mag2() << " direction_mag2=" << shower.fDCosStart.Mag2()
-              << " usable=" << usableShower(shower) << " planes=";
-            for (auto ci : matches.at(shower.fIndex)) std::cout << trial.clusters.at(ci).Plane().Plane << ",";
-            std::cout << std::endl;
-          }
-          for (auto shower : reconstructed) if (usableShower(shower)) {
-            trial.matches.push_back(matches.at(shower.fIndex));
-            shower.fIndex = trial.showers.size();
-            trial.showers.push_back(shower);
-          }
-          if (trial.showers.size() != 2) continue;
-          ++usablePairs;
-          if (maxOutputStartDistance>0.) {
-            bool near = true;
-            for (const auto& shower : trial.showers) {
-              const double distance=(shower.fXYZStart-TVector3(vertex.X(),vertex.Y(),vertex.Z())).Mag();
-              near = near && std::isfinite(distance) && distance<=maxOutputStartDistance;
+              << " reconstruct_swap_mask=" << option.hypothesis.swapMask
+              << " retained_plane_mask=" << option.hypothesis.planeMask
+              << " two_plane_fallback=" << option.hypothesis.twoPlaneFallback << std::endl;
+            // Never truncate a match set: that could hide a third usable shower.
+            if (matches.size() > maxRecoShowers_-recoShowers) { ++budgetSkipped; continue; }
+            recoShowers += matches.size();
+            std::vector<protoshower::ProtoShower> protos;
+            for (const auto& match : matches) {
+              protoshower::ProtoShower proto;
+              proto.Reset();
+              proto._index = protos.size();
+              proto._vertex = TVector3(vertex.X(),vertex.Y(),vertex.Z());
+              proto.hasVertex(true);
+              for (auto index : match) {
+                const auto& cl = trial.clusters.at(index);
+                cluster2d::Cluster2D twoD{};
+                twoD._plane = cl.Plane().Plane;
+                twoD._angle_2d = cl.StartAngle();
+                twoD._opening_angle = 0.;
+                twoD._start = util::PxHit(twoD._plane, cl.StartWire()*wire2cm,
+                  (cl.StartTick()-trigger_offset(clock))*time2cm,0.,0.,0.);
+                twoD._end = util::PxHit(twoD._plane, cl.EndWire()*wire2cm,
+                  (cl.EndTick()-trigger_offset(clock))*time2cm,0.,0.,0.);
+                for (const auto& hit : trial.clusterHits.at(index)) {
+                  const double energy = hit->Integral()*calibration.at(twoD._plane);
+                  twoD._hits.emplace_back(twoD._plane,hit->WireID().Wire*wire2cm,
+                    (hit->PeakTime()-trigger_offset(clock))*time2cm,energy,energy,hit->PeakAmplitude());
+                }
+                proto._clusters.push_back(std::move(twoD));
+              }
+              proto.hasCluster2D(!proto._clusters.empty());
+              protos.push_back(std::move(proto));
             }
-            if (!near) {
-              std::cout << "[SingleShowerRecovery] event " << e.id() << " recovered_start_reject=1" << std::endl;
-              continue;
+            reco.SetProtoShowers(protos);
+            std::vector<Shower_t> reconstructed;
+            reco.Reconstruct(geometry, reconstructed);
+            for (const auto& shower : reconstructed) {
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+                << " reco_candidate=" << shower.fIndex << " passed=" << shower.fPassedReconstruction
+                << " start_mag2=" << shower.fXYZStart.Mag2() << " direction_mag2=" << shower.fDCosStart.Mag2()
+                << " usable=" << usableShower(shower) << " planes=";
+              for (auto ci : matches.at(shower.fIndex)) std::cout << trial.clusters.at(ci).Plane().Plane << ",";
+              std::cout << std::endl;
             }
-          }
-          std::array<HitList,2> outputHits;
-          for (std::size_t s = 0; s < 2; ++s) for (auto ci : trial.matches[s])
-            outputHits[s].insert(outputHits[s].end(),trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
-          if (!disjointHits(outputHits[0],outputHits[1])) { ++ownershipRejected; continue; }
-          std::set<art::Ptr<recob::Hit>> recovered;
-          for (const auto& match : trial.matches) for (auto ci : match)
-            recovered.insert(trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
-          std::size_t retained = 0;
-          for (const auto& hit : original) retained += recovered.count(hit);
-          if (double(retained)/original.size() < minCoverage_) { ++coverageRejected; continue; }
-          // A split must actually contribute both pieces to the accepted pair.
-          // Otherwise unrelated unmatched fragments could masquerade as recovery.
-          bool contributes = false;
-          for (const auto& children : splitChildren) {
-            const auto contains = [&](std::size_t shower, std::size_t child) {
-              const auto& match = trial.matches[shower];
-              return std::find(match.begin(),match.end(),child) != match.end();
-            };
-            contributes = contributes || (contains(0,children[0]) && contains(1,children[1]))
-                                      || (contains(1,children[0]) && contains(0,children[1]));
-          }
-          if (!contributes) { ++contributionRejected; continue; }
-          report("accepted");
-          return trial;
+            for (auto shower : reconstructed) if (usableShower(shower)) {
+              trial.matches.push_back(matches.at(shower.fIndex));
+              shower.fIndex = trial.showers.size();
+              trial.showers.push_back(shower);
+            }
+            if (trial.showers.size() != 2) continue;
+            ++usablePairs;
+            if (maxOutputStartDistance>0.) {
+              bool near = true;
+              for (const auto& shower : trial.showers) {
+                const double distance=(shower.fXYZStart-TVector3(vertex.X(),vertex.Y(),vertex.Z())).Mag();
+                near = near && std::isfinite(distance) && distance<=maxOutputStartDistance;
+              }
+              if (!near) {
+                std::cout << "[SingleShowerRecovery] event " << e.id() << " recovered_start_reject=1" << std::endl;
+                continue;
+              }
+            }
+            std::array<HitList,2> outputHits;
+            for (std::size_t s = 0; s < 2; ++s) for (auto ci : trial.matches[s])
+              outputHits[s].insert(outputHits[s].end(),trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
+            if (!disjointHits(outputHits[0],outputHits[1])) { ++ownershipRejected; continue; }
+            std::set<art::Ptr<recob::Hit>> recovered;
+            for (const auto& match : trial.matches) for (auto ci : match)
+              recovered.insert(trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());
+            std::size_t retained = 0, considered = 0;
+            for (const auto& hit : original) {
+              if (option.hypothesis.twoPlaneFallback &&
+                  !(option.hypothesis.planeMask&(1u<<hit->WireID().Plane))) continue;
+              ++considered;
+              retained += recovered.count(hit);
+            }
+            std::cout << "[SingleShowerRecovery] event " << e.id() << " coverage_retained=" << retained
+              << " coverage_considered=" << considered << " coverage_omitted=" << original.size()-considered << std::endl;
+            if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
+            // A split must actually contribute both pieces to the accepted pair.
+            // Otherwise unrelated unmatched fragments could masquerade as recovery.
+            bool contributes = false;
+            for (const auto& children : splitChildren) {
+              const auto contains = [&](std::size_t shower, std::size_t child) {
+                const auto& match = trial.matches[shower];
+                return std::find(match.begin(),match.end(),child) != match.end();
+              };
+              contributes = contributes || (contains(0,children[0]) && contains(1,children[1]))
+                                        || (contains(1,children[0]) && contains(0,children[1]));
+            }
+            if (!contributes) { ++contributionRejected; continue; }
+            report("accepted");
+            return trial;
           } // ranked matching hypotheses
         }
     report("no_accepted_pair");
@@ -428,6 +473,8 @@ public:
 private:
   bool useSpacePoints_;
   bool tryAlternativePairings_;
+  bool allowTwoPlaneFallback_;
+  double minTwoPlaneWeight_;
   std::unique_ptr<clusmtool::CFloatAlgoBase> pairingTool_;
   art::InputTag spacePointTag_, spacePointHitTag_;
   double minPointWeight_, maxPointConflict_;
