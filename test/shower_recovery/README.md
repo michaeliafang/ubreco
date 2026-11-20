@@ -171,3 +171,31 @@ counts. The omitted plane is not assigned to the recovered showers. Source
 clusters and diagnostic products remain available. Pairing alternatives and
 fallback can each be disabled independently; with UseSpacePoints false both
 are inactive. A low conflict score still is not proof of correct reconstruction.
+
+## November 20 change ledger and rollback
+
+- `fc78169`: gated actual two-shower recovery; candidate-only three-shower tests.
+- `e475a65`: spacepoint-ranked alternative cross-plane cluster assignments.
+- `4cd5c98`: supported collection-plus-induction fallback and retained-view coverage.
+- Reconstruction failure logging: `[ShowerRecoFailure]` identifies candidate,
+  failing tool and exception reason. Correlate with surrounding event/trial logs.
+
+For independent comparisons, override these under
+`physics.producers.showersplittest.SingleShowerRecovery`:
+`RecoverTwoShowers`, `TryAlternativePairings`, `AllowTwoPlaneFallback`, and
+`DiagnoseThreeShowers`. Set false to disable each; setting all four false restores
+the previous selection features (additional diagnostics can remain). Reverting
+commits is an alternative, in reverse dependency order; do not rewrite history.
+
+Suggested GPVM checks: 616 preserves its successful recovery; 650 exercises
+pairing changes; 602 exercises retained planes 1+2; 614/4881/4890 exercise eligible
+two-shower recovery if they satisfy the explicit charge/distance cuts; 4867 gets
+candidates but its three baseline showers stay intact; 4901 reports the failed
+reconstruction tool. Event displays alone do not establish eligibility fractions.
+785 still cannot borrow singleton start hits: fragment handling, induction-streak
+suppression and induction-only reconstruction remain deferred. No cmerger edits.
+
+Local validation used all four standalone tests with C++17, -O2, -DNDEBUG,
+-Wall -Wextra -Werror -pedantic. These validate helper logic; they do not compile
+art/LArSoft integration or demonstrate physics performance. No claim about full
+job runtime or successful reconstruction is possible until GPVM testing.

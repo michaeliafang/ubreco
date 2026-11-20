@@ -21,6 +21,7 @@
 #include "lardata/DetectorInfoServices/DetectorPropertiesService.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 #include <chrono>
+#include <memory>
 #include <set>
 #include <string>
 

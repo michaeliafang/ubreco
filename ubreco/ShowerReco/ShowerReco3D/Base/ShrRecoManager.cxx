@@ -76,7 +76,8 @@ namespace showerreco {
       catch (ShowerRecoException const& e) {
 	//catch (std::exception e) {
 	result.fPassedReconstruction = false;
-	std::cout << e.what() << std::endl;
+        std::cout << "[ShowerRecoFailure] candidate=" << proto_shower._index
+                  << " tool=" << _alg_v[n]->name() << " reason=" << e.what() << std::endl;
 	return result;
       }// if reco fails
       _alg_time_v[n] += _watch.RealTime();
