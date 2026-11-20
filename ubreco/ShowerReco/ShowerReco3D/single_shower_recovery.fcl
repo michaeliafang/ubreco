@@ -13,6 +13,7 @@ single_shower_recovery: {
   DetachedShowerMinDistance: 20.0 # cm in 3D; strict greater-than
   DetachedShowerMaxChargeFraction: 0.30 # positive collection-plane charge; strict less-than
   RecoveredPairMaxStartDistance: 5.0 # both replacement starts within this 3D radius
+  TryAlternativePairings: true # only with sufficient mapped spacepoint evidence
   MatchTool: @local::match_cfalgoiou
   PriorityTool: @local::priority_cpalgonhits
   MinHits: 10

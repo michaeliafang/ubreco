@@ -135,3 +135,17 @@ baseline pairs still use `DiagnoseTwoShowers`. Near-vertex singleton/fragment
 handling remains unchanged and deferred. New options default off in C++ but
 are enabled in the experimental recovery FCL; set each false for independent
 comparisons. Local tests cover eligibility, not the art integration.
+
+## Alternative cross-plane pairings
+
+`TryAlternativePairings` enumerates the distinct swaps for exactly two matched
+showers with one cluster in each common plane (four possibilities for three
+planes; two for two planes). Swaps are actual cluster reassignment before
+reconstruction, not merely relabeled diagnostic points. They must pass the
+configured matching tool, hit exclusivity, and the existing spacepoint conflict
+cut with sufficient weight. Surviving assignments are ranked by conflict and
+reconstructed within the shared MaxRecoShowers budget. No third match is dropped
+to force a two-shower result. With UseSpacePoints false, alternatives are disabled.
+`pairing_swap_mask` uses plane bits 1/2/4 (unlike the old diagnostic flip mask,
+which used 1/2 to mean planes 1/2); `reconstruct_swap_mask` records the choice.
+The original pairing remains the sparse-evidence fallback.

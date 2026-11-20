@@ -5,6 +5,7 @@
 #include "VertexSplit.h"
 #include "HitOwnership.h"
 #include "RecoveryEligibility.h"
+#include "MatchHypotheses.h"
 #include "SpacePointConsistency.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
 #include "canvas/Utilities/InputTag.h"
@@ -70,6 +71,8 @@ public:
     if (!std::isfinite(minPointWeight_) || minPointWeight_<=0. ||
         !std::isfinite(maxPointConflict_) || maxPointConflict_<0. || maxPointConflict_>1.)
       throw std::invalid_argument("Invalid spacepoint consistency configuration");
+    tryAlternativePairings_ = p.get<bool>("TryAlternativePairings",false);
+    pairingTool_ = art::make_tool<clusmtool::CFloatAlgoBase>(p.get<fhicl::ParameterSet>("MatchTool"));
     maxMatchTrials_ = p.get<unsigned int>("MaxMatchTrials", 4);
     if (maxMatchTrials_ == 0 || maxMatchTrials_ > 124)
       throw std::invalid_argument("MaxMatchTrials must be between 1 and 124");
@@ -249,23 +252,28 @@ public:
           matcher_.Reset();
           matcher_.SetClusters(cmClusters);
           matcher_.Process();
-          const auto matches = matcher_.GetBookKeeper().GetResult();
+          const auto initialMatches = matcher_.GetBookKeeper().GetResult();
+          const auto& matches = initialMatches;
           if (matches.size() < 2) continue;
           ++matched;
-          if (useSpacePoints_) {
+          const auto assignedFor = [&](const ClusterMatches& hypothesis) {
             std::map<art::Ptr<recob::Hit>,unsigned int> ownership;
-            for (std::size_t m=0; m<matches.size(); ++m)
-              for (auto ci : matches[m]) for (const auto& h : trial.clusterHits.at(ci))
+            for (std::size_t m=0; m<hypothesis.size(); ++m)
+              for (auto ci : hypothesis[m]) for (const auto& h : trial.clusterHits.at(ci))
                 ownership.emplace(h,static_cast<unsigned int>(m));
             std::vector<std::vector<AssignedPointHit>> assigned;
             for (const auto& point : pointHits) {
               std::vector<AssignedPointHit> hits;
               for (const auto& h : point) {
-                const auto found = ownership.find(h);
+                const auto found=ownership.find(h);
                 if (found!=ownership.end()) hits.push_back({h.key(),h->WireID().Plane,found->second});
               }
               if (hits.size()>=2) assigned.push_back(std::move(hits));
             }
+            return assigned;
+          };
+          if (useSpacePoints_) {
+            const auto assigned = assignedFor(initialMatches);
             const auto detail = diagnosePoints(assigned,matches.size()==2);
             for (std::size_t k=0; k<3; ++k) {
               const char* pairs[] = {"01","02","12"};
@@ -279,13 +287,56 @@ public:
             if (matches.size()==2) for (unsigned mask=0; mask<4; ++mask)
               std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
                 << " sps_flip_mask=" << mask << " sps_flip_conflict=" << detail.flipConflict[mask] << std::endl;
-            const auto consistency = pointConsistency(assigned);
-            const bool reject = consistency.weight >= minPointWeight_ && consistency.fraction() > maxPointConflict_;
-            std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " trial=" << trials
-              << " sps_points=" << consistency.informative << " sps_weight=" << consistency.weight
-              << " sps_conflict=" << consistency.fraction() << " sps_reject=" << reject << std::endl;
-            if (reject) continue;
           }
+          std::vector<unsigned> planes;
+          for (const auto& cl : trial.clusters) planes.push_back(cl.Plane().Plane);
+          std::vector<MatchHypothesis> hypotheses{{initialMatches,7,0}};
+          if (useSpacePoints_ && tryAlternativePairings_) {
+            const auto alternatives=pairingHypotheses(initialMatches,planes);
+            for (const auto& h : alternatives) if (h.swapMask) hypotheses.push_back(h);
+          }
+          struct ScoredHypothesis { MatchHypothesis hypothesis; PointConsistency score; };
+          std::vector<ScoredHypothesis> scored;
+          for (const auto& h : hypotheses) {
+            // Alternative assignments must still satisfy the configured matching
+            // tool, and no hypothesis may assign a hit to multiple showers.
+            bool compatible=true;
+            std::set<art::Ptr<recob::Hit>> used;
+            for (const auto& match : h.matches) {
+              std::set<art::Ptr<recob::Hit>> own;
+              std::vector<const cluster::Cluster*> cl;
+              for (auto ci : match) {
+                cl.push_back(&cmClusters.at(ci));
+                own.insert(trial.clusterHits.at(ci).begin(),trial.clusterHits.at(ci).end());
+              }
+              for (const auto& hit : own) if (!used.insert(hit).second) compatible=false;
+              if (h.swapMask) {
+                pairingTool_->Reset();
+                const double value=pairingTool_->Float(cl);
+                if (!std::isfinite(value) || value<0.) compatible=false;
+              }
+            }
+            if (!compatible) continue;
+            const auto assigned=assignedFor(h.matches);
+            const auto score=pointConsistency(assigned);
+            const bool reject=useSpacePoints_ && score.weight>=minPointWeight_ && score.fraction()>maxPointConflict_;
+            std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+              << " pairing_swap_mask=" << h.swapMask << " plane_mask=" << h.planeMask
+              << " sps_weight=" << score.weight << " sps_conflict=" << score.fraction()
+              << " sps_reject=" << reject << std::endl;
+            // Sparse points do not justify changing the original pairing.
+            if (reject || (h.swapMask && score.weight<minPointWeight_)) continue;
+            scored.push_back({h,score});
+          }
+          std::stable_sort(scored.begin(),scored.end(),[](const auto& a,const auto& b) {
+            return a.score.fraction()<b.score.fraction();
+          });
+          for (const auto& option : scored) {
+          const auto& matches=option.hypothesis.matches;
+          trial.matches.clear();
+          trial.showers.clear();
+          std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+            << " reconstruct_swap_mask=" << option.hypothesis.swapMask << std::endl;
           // Never truncate a match set: that could hide a third usable shower.
           if (matches.size() > maxRecoShowers_-recoShowers) { ++budgetSkipped; continue; }
           recoShowers += matches.size();
@@ -369,12 +420,15 @@ public:
           if (!contributes) { ++contributionRejected; continue; }
           report("accepted");
           return trial;
+          } // ranked matching hypotheses
         }
     report("no_accepted_pair");
     return none;
   }
 private:
   bool useSpacePoints_;
+  bool tryAlternativePairings_;
+  std::unique_ptr<clusmtool::CFloatAlgoBase> pairingTool_;
   art::InputTag spacePointTag_, spacePointHitTag_;
   double minPointWeight_, maxPointConflict_;
   SplitConfig cfg_;
