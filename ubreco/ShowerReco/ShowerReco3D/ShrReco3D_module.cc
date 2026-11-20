@@ -94,6 +94,7 @@ private:
   std::unique_ptr<showerreco::recovery::SingleShowerRecovery> fRecovery;
   std::vector<double> fRecoveryCalibration;
   bool fSaveSplitCandidates = false;
+  bool fDiagnoseTwoShowers = false;
   
   /// map for backtracking which stores mcshower index to vector of track ids for the mcshower
   std::map<size_t, std::vector<unsigned int> > _MCShowerInfo;  
@@ -264,6 +265,7 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
       throw std::invalid_argument("SingleShowerRecovery requires consistent ProtoShowerCMTool inputs");
     fRecovery.reset(new showerreco::recovery::SingleShowerRecovery(recovery));
     fSaveSplitCandidates = recovery.get<bool>("SaveSplitCandidates",false);
+    fDiagnoseTwoShowers = recovery.get<bool>("DiagnoseTwoShowers",false);
     if (fSaveSplitCandidates) {
       produces<std::vector<recob::Cluster>>("showersplitCandidates");
       produces<art::Assns<recob::Cluster,recob::Hit>>("showersplitCandidates");
@@ -370,7 +372,8 @@ void ShrReco3D::produce(art::Event & e)
   const auto usable = [](const showerreco::Shower_t& s) {
     return showerreco::recovery::usableShower(s);
   };
-  if (fRecovery && std::count_if(output_shower_v.begin(), output_shower_v.end(), usable) == 1) {
+  const auto baselineUsable = std::count_if(output_shower_v.begin(),output_shower_v.end(),usable);
+  if (fRecovery && baselineUsable == 1) {
     const auto baseline = std::find_if(output_shower_v.begin(), output_shower_v.end(), usable);
     auto recovered = fRecovery->run(e, fClusproducer, fVtxproducer,
       pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser,
@@ -405,6 +408,10 @@ void ShrReco3D::produce(art::Event & e)
     }
     else std::cout << "[SingleShowerRecovery] " << "Retaining single shower in event " << e.id() << std::endl;
   }
+
+  // Inspect baseline two-shower inputs without matching or reconstruction.
+  if (fRecovery && fSaveSplitCandidates && fDiagnoseTwoShowers && baselineUsable==2)
+    fRecovery->run(e,fClusproducer,fVtxproducer,{},fRecoveryCalibration,*_manager,gser,&diagnostic,true);
 
   // save output showers
   for (size_t s=0; s < output_shower_v.size(); s++) {

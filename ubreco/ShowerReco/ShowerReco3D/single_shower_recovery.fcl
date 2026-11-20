@@ -7,6 +7,7 @@ BEGIN_PROLOG
 single_shower_recovery: {
   Enable: true
   SaveSplitCandidates: true
+  DiagnoseTwoShowers: true    # candidates only; never replace two baseline showers
   MatchTool: @local::match_cfalgoiou
   PriorityTool: @local::priority_cpalgonhits
   MinHits: 10

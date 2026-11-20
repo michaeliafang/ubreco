@@ -94,3 +94,20 @@ both use the default instance, avoiding viewers' loss of instance labels. The
 source `showersplittest:showersplitCandidates` remains intact. The copier logs
 cluster and association counts under `[ShowerSplitCandidateDisplay]`; it does not
 rerun splitting or alter reconstruction. Full art publication needs GPVM validation.
+
+Investigation diagnostics: DiagnoseTwoShowers (enabled in recovery FCL) generates
+split candidates for exactly two usable baseline showers, but returns before
+cross-plane matching or reconstruction and never replaces their output. Thus 614
+can be inspected without enabling two-shower recovery. No distance/charge-based
+two-shower eligibility cuts are applied in this diagnostic mode.
+
+Spacepoint diagnostics report separately normalized plane-pair conflict/weight
+for 01, 02, 12; a conservative subset with one assigned hit per represented plane
+and no assigned-hit reuse across points; and four hypothetical label permutations
+when there are exactly two matched candidates. Flip masks 0/1/2/3 mean unchanged,
+flip plane 1, flip plane 2, flip both (plane 0 fixed). These hypotheses do not
+rematch clusters or establish valid showers. The uniqueness subset is based on
+assigned mapped hits only, not all original solver associations, and is not proof
+of physical correspondence. Zero conflict with zero weight means no evidence.
+None of these diagnostics changes the existing aggregate conflict veto. Their
+additional work is linear in assigned associations per fixed diagnostic pass.

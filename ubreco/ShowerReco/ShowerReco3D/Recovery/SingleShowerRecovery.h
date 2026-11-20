@@ -60,7 +60,7 @@ public:
     cfg_.maxEdges = p.get<unsigned int>("MaxEdges", 200000);
     cfg_.validate();
     useSpacePoints_ = p.get<bool>("UseSpacePoints",false);
-    if (useSpacePoints_) {
+    if (useSpacePoints_ && !diagnosticOnly) {
       spacePointTag_ = p.get<art::InputTag>("SpacePointProducer");
       spacePointHitTag_ = p.get<art::InputTag>("SpacePointHitProducer");
     }
@@ -88,7 +88,7 @@ public:
   RecoveryResult run(art::Event& e, const std::string& clusterLabel, const std::string& vertexLabel,
                      const HitList& originalHits, const std::vector<double>& calibration,
                      ShrRecoManager& reco, const util::GeometryUtilities& geometry,
-                     RecoveryResult* diagnostic = nullptr) {
+                     RecoveryResult* diagnostic = nullptr, bool diagnosticOnly = false) {
     const auto started = std::chrono::steady_clock::now();
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
     std::size_t duplicatesRemoved = 0, overlappingInputHits = 0, ownershipRejected = 0;
@@ -104,7 +104,7 @@ public:
     };
     RecoveryResult none;
     const auto vertices = e.getValidHandle<std::vector<recob::Vertex>>(vertexLabel);
-    if (vertices->size() != 1 || originalHits.empty()) { report("missing_vertex_or_hits"); return none; }
+    if (vertices->size() != 1 || (!diagnosticOnly && originalHits.empty())) { report("missing_vertex_or_hits"); return none; }
     std::vector<HitList> pointHits;
     if (useSpacePoints_) {
       const auto points = e.getValidHandle<std::vector<recob::SpacePoint>>(spacePointTag_);
@@ -196,6 +196,7 @@ public:
             << " diagnostic_clusters=" << first << "," << first+1 << std::endl;
         }
     }
+    if (diagnosticOnly) { report("diagnostic_only"); return none; }
     const std::set<art::Ptr<recob::Hit>> original(originalHits.begin(), originalHits.end());
     // Each plane can retain its existing clusters or split one candidate.
     // At most (MaxCandidatesPerPlane+1)^3-1 trials; first successful trial wins.
@@ -259,6 +260,19 @@ public:
               }
               if (hits.size()>=2) assigned.push_back(std::move(hits));
             }
+            const auto detail = diagnosePoints(assigned,matches.size()==2);
+            for (std::size_t k=0; k<3; ++k) {
+              const char* pairs[] = {"01","02","12"};
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+                << " sps_pair=" << pairs[k] << " points=" << detail.pairs[k].informative
+                << " weight=" << detail.pairs[k].weight << " conflict=" << detail.pairs[k].fraction() << std::endl;
+            }
+            std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+              << " sps_unique_points=" << detail.unique.informative << " sps_unique_weight=" << detail.unique.weight
+              << " sps_unique_conflict=" << detail.unique.fraction() << std::endl;
+            if (matches.size()==2) for (unsigned mask=0; mask<4; ++mask)
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " trial=" << trials
+                << " sps_flip_mask=" << mask << " sps_flip_conflict=" << detail.flipConflict[mask] << std::endl;
             const auto consistency = pointConsistency(assigned);
             const bool reject = consistency.weight >= minPointWeight_ && consistency.fraction() > maxPointConflict_;
             std::cout << "[SingleShowerRecovery] " << "event " << e.id() << " trial=" << trials

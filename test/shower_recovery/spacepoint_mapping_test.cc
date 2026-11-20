@@ -34,5 +34,15 @@ int main() {
   for (auto& point : paired) for (auto& hit : point)
     if (hit.plane == 1) hit.shower = 1-hit.shower;
   CHECK(std::abs(pointConsistency(paired).fraction()-(1.-originalConflict)) < 1.e-12);
+  const std::vector<std::vector<AssignedPointHit>> evidence{
+    {{0,0,0},{1,1,1},{2,2,0}}, {{3,0,1},{4,1,0},{5,2,1}}};
+  const auto detail = diagnosePoints(evidence,true);
+  CHECK(detail.pairs[0].fraction()==1. && detail.pairs[1].fraction()==0. && detail.pairs[2].fraction()==1.);
+  CHECK(detail.unique.informative==2 && detail.unique.fraction()==1.);
+  CHECK(detail.flipConflict[0]==1. && detail.flipConflict[1]==0.);
+  auto repeated = evidence; repeated.push_back(evidence[0]);
+  CHECK(diagnosePoints(repeated,true).unique.informative==1);
+  CHECK(diagnosePoints({},true).unique.weight==0.);
+  CHECK(pointConsistency(evidence).fraction()==1.); // diagnostics leave input untouched
   std::cout << "Spacepoint mapping and consistency tests passed\n";
 }
