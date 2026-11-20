@@ -4,6 +4,7 @@
 
 #include "VertexSplit.h"
 #include "HitOwnership.h"
+#include "RecoveryEligibility.h"
 #include "SpacePointConsistency.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
 #include "canvas/Utilities/InputTag.h"
@@ -88,7 +89,8 @@ public:
   RecoveryResult run(art::Event& e, const std::string& clusterLabel, const std::string& vertexLabel,
                      const HitList& originalHits, const std::vector<double>& calibration,
                      ShrRecoManager& reco, const util::GeometryUtilities& geometry,
-                     RecoveryResult* diagnostic = nullptr, bool diagnosticOnly = false) {
+                     RecoveryResult* diagnostic = nullptr, bool diagnosticOnly = false,
+                     double maxOutputStartDistance = 0., const HitList& excludedHits = {}) {
     const auto started = std::chrono::steady_clock::now();
     std::size_t trials = 0, matched = 0, recoShowers = 0, usablePairs = 0, coverageRejected = 0, contributionRejected = 0, budgetSkipped = 0;
     std::size_t duplicatesRemoved = 0, overlappingInputHits = 0, ownershipRejected = 0;
@@ -130,11 +132,15 @@ public:
     std::array<std::vector<Candidate>, 3> candidates;
     std::vector<HitList> allHits;
     std::set<art::Ptr<recob::Hit>> uniqueHits;
+    const std::set<art::Ptr<recob::Hit>> excluded(excludedHits.begin(),excludedHits.end());
     for (std::size_t c = 0; c < clusters->size(); ++c) {
       const auto inputHits = associations.at(c);
       allHits.push_back(uniqueHitsInOrder(inputHits));
       duplicatesRemoved += inputHits.size()-allHits.back().size();
-      const auto& hits = allHits.back();
+      auto& retainedHits = allHits.back();
+      retainedHits.erase(std::remove_if(retainedHits.begin(),retainedHits.end(),
+        [&](const auto& hit) { return excluded.count(hit); }),retainedHits.end());
+      const auto& hits = retainedHits;
       if (hits.empty()) continue;
       const unsigned int plane = hits.front()->WireID().Plane;
       if (plane >= 3) { report("invalid_plane"); return none; }
@@ -328,6 +334,17 @@ public:
           }
           if (trial.showers.size() != 2) continue;
           ++usablePairs;
+          if (maxOutputStartDistance>0.) {
+            bool near = true;
+            for (const auto& shower : trial.showers) {
+              const double distance=(shower.fXYZStart-TVector3(vertex.X(),vertex.Y(),vertex.Z())).Mag();
+              near = near && std::isfinite(distance) && distance<=maxOutputStartDistance;
+            }
+            if (!near) {
+              std::cout << "[SingleShowerRecovery] event " << e.id() << " recovered_start_reject=1" << std::endl;
+              continue;
+            }
+          }
           std::array<HitList,2> outputHits;
           for (std::size_t s = 0; s < 2; ++s) for (auto ci : trial.matches[s])
             outputHits[s].insert(outputHits[s].end(),trial.clusterHits[ci].begin(),trial.clusterHits[ci].end());

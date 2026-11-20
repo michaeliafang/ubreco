@@ -7,7 +7,12 @@ BEGIN_PROLOG
 single_shower_recovery: {
   Enable: true
   SaveSplitCandidates: true
-  DiagnoseTwoShowers: true    # candidates only; never replace two baseline showers
+  DiagnoseTwoShowers: true    # diagnostic fallback for ineligible two-shower events
+  DiagnoseThreeShowers: true  # diagnostic only; never replace three baseline showers
+  RecoverTwoShowers: true     # independent experimental option
+  DetachedShowerMinDistance: 20.0 # cm in 3D; strict greater-than
+  DetachedShowerMaxChargeFraction: 0.30 # positive collection-plane charge; strict less-than
+  RecoveredPairMaxStartDistance: 5.0 # both replacement starts within this 3D radius
   MatchTool: @local::match_cfalgoiou
   PriorityTool: @local::priority_cpalgonhits
   MinHits: 10

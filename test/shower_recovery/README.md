@@ -111,3 +111,27 @@ assigned mapped hits only, not all original solver associations, and is not proo
 of physical correspondence. Zero conflict with zero weight means no evidence.
 None of these diagnostics changes the existing aggregate conflict veto. Their
 additional work is linear in assigned associations per fixed diagnostic pass.
+
+## Independently switchable multi-shower recovery
+
+`RecoverTwoShowers` enables replacement only for exactly two usable baseline
+showers with disjoint hit lists: one starts >20 cm from the reconstructed vertex
+and has <30% of their summed positive collection-plane hit integral; the other
+starts <=20 cm away. Hits are deduplicated; missing/invalid collection charge
+fails eligibility. Using only collection charge avoids summing unequal view
+coverage. These distances and fractions are configurable. No inference is made
+from cone length or display angle.
+
+The detached shower's hits are excluded from trial inputs. Coverage is measured
+against the remaining baseline shower. A successful replacement must have two
+usable, disjoint showers, both with 3D starts <=5 cm from the vertex, and must use
+both daughters of an actual split. Failed recovery preserves every baseline
+product. Source cmerger products are not modified. This is an experimental
+selection: excluding detached hits may discard genuine branch charge.
+
+`DiagnoseThreeShowers` adds candidate-only output for exactly three baseline
+showers (e.g. 4867), without matching or changing shower output. Ineligible
+baseline pairs still use `DiagnoseTwoShowers`. Near-vertex singleton/fragment
+handling remains unchanged and deferred. New options default off in C++ but
+are enabled in the experimental recovery FCL; set each false for independent
+comparisons. Local tests cover eligibility, not the art integration.

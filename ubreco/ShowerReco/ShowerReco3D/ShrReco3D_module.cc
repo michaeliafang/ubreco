@@ -95,6 +95,9 @@ private:
   std::vector<double> fRecoveryCalibration;
   bool fSaveSplitCandidates = false;
   bool fDiagnoseTwoShowers = false;
+  bool fDiagnoseThreeShowers = false;
+  bool fRecoverTwoShowers = false;
+  double fDetachedDistance = 20., fDetachedFraction = 0.3, fRecoveredStartDistance = 5.;
   
   /// map for backtracking which stores mcshower index to vector of track ids for the mcshower
   std::map<size_t, std::vector<unsigned int> > _MCShowerInfo;  
@@ -266,6 +269,15 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
     fRecovery.reset(new showerreco::recovery::SingleShowerRecovery(recovery));
     fSaveSplitCandidates = recovery.get<bool>("SaveSplitCandidates",false);
     fDiagnoseTwoShowers = recovery.get<bool>("DiagnoseTwoShowers",false);
+    fDiagnoseThreeShowers = recovery.get<bool>("DiagnoseThreeShowers",false);
+    fRecoverTwoShowers = recovery.get<bool>("RecoverTwoShowers",false);
+    fDetachedDistance = recovery.get<double>("DetachedShowerMinDistance",20.);
+    fDetachedFraction = recovery.get<double>("DetachedShowerMaxChargeFraction",0.3);
+    fRecoveredStartDistance = recovery.get<double>("RecoveredPairMaxStartDistance",5.);
+    if (!std::isfinite(fDetachedDistance) || fDetachedDistance<=0. ||
+        !std::isfinite(fDetachedFraction) || fDetachedFraction<=0. || fDetachedFraction>=0.5 ||
+        !std::isfinite(fRecoveredStartDistance) || fRecoveredStartDistance<=0.)
+      throw std::invalid_argument("Invalid two-shower recovery thresholds");
     if (fSaveSplitCandidates) {
       produces<std::vector<recob::Cluster>>("showersplitCandidates");
       produces<art::Assns<recob::Cluster,recob::Hit>>("showersplitCandidates");
@@ -373,11 +385,45 @@ void ShrReco3D::produce(art::Event & e)
     return showerreco::recovery::usableShower(s);
   };
   const auto baselineUsable = std::count_if(output_shower_v.begin(),output_shower_v.end(),usable);
-  if (fRecovery && baselineUsable == 1) {
-    const auto baseline = std::find_if(output_shower_v.begin(), output_shower_v.end(), usable);
+  auto baseline = std::find_if(output_shower_v.begin(),output_shower_v.end(),usable);
+  showerreco::recovery::HitList excluded;
+  bool recoverTwo = false;
+  if (fRecovery && fRecoverTwoShowers && baselineUsable==2) {
+    const auto vertices = e.getValidHandle<std::vector<recob::Vertex>>(fVtxproducer);
+    if (vertices->size()==1) {
+      std::array<std::size_t,2> indices{};
+      std::array<double,2> distances{}, charge{};
+      std::array<showerreco::recovery::HitList,2> hits;
+      std::size_t k=0;
+      const auto v = vertices->front().position();
+      const TVector3 vertex(v.X(),v.Y(),v.Z());
+      for (std::size_t i=0; i<output_shower_v.size(); ++i) if (usable(output_shower_v[i])) {
+        indices[k]=i;
+        distances[k]=(output_shower_v[i].fXYZStart-vertex).Mag();
+        hits[k]=showerreco::recovery::uniqueHitsInOrder(pfp_hit_assn_v.at(output_shower_v[i].fIndex));
+        for (const auto& hit : hits[k]) if (hit->WireID().Plane==2) {
+          const double q=hit->Integral();
+          if (!std::isfinite(q)) { charge[k]=std::numeric_limits<double>::quiet_NaN(); break; }
+          charge[k]+=std::max(0.,q);
+        }
+        ++k;
+      }
+      const int target = showerreco::recovery::recoveryTarget(distances,charge,fDetachedDistance,fDetachedFraction);
+      recoverTwo = target>=0 && showerreco::recovery::disjointHits(hits[0],hits[1]);
+      std::cout << "[SingleShowerRecovery] event " << e.id() << " two_shower_eligible=" << recoverTwo
+        << " start_distances=" << distances[0] << "," << distances[1]
+        << " collection_charges=" << charge[0] << "," << charge[1] << std::endl;
+      if (recoverTwo) {
+        baseline=output_shower_v.begin()+indices[target];
+        excluded=std::move(hits[1-target]);
+      }
+    }
+  }
+  if (fRecovery && (baselineUsable==1 || recoverTwo)) {
     auto recovered = fRecovery->run(e, fClusproducer, fVtxproducer,
       pfp_hit_assn_v.at(baseline->fIndex), fRecoveryCalibration, *_manager, gser,
-      fSaveSplitCandidates ? &diagnostic : nullptr);
+      fSaveSplitCandidates ? &diagnostic : nullptr,false,
+      recoverTwo ? fRecoveredStartDistance : 0.,excluded);
     // Never replace a usable baseline by zero, one, or more than two showers.
     if (recovered.showers.size() == 2) {
       art::PtrMaker<recob::Cluster> makeCluster(e, "recovery");
@@ -406,11 +452,12 @@ void ShrReco3D::produce(art::Event & e)
       output_shower_v = std::move(recovered.showers);
       std::cout << "[SingleShowerRecovery] " << "Recovered two showers in event " << e.id() << std::endl;
     }
-    else std::cout << "[SingleShowerRecovery] " << "Retaining single shower in event " << e.id() << std::endl;
+    else std::cout << "[SingleShowerRecovery] " << "Retaining baseline showers in event " << e.id() << std::endl;
   }
 
-  // Inspect baseline two-shower inputs without matching or reconstruction.
-  if (fRecovery && fSaveSplitCandidates && fDiagnoseTwoShowers && baselineUsable==2)
+  // Inspect multi-shower inputs without matching, reconstruction or replacement.
+  if (fRecovery && fSaveSplitCandidates && !recoverTwo &&
+      ((fDiagnoseTwoShowers && baselineUsable==2) || (fDiagnoseThreeShowers && baselineUsable==3)))
     fRecovery->run(e,fClusproducer,fVtxproducer,{},fRecoveryCalibration,*_manager,gser,&diagnostic,true);
 
   // save output showers
