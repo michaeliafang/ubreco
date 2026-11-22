@@ -36,13 +36,16 @@ struct RecoveryResult {
   std::vector<Shower_t> showers;
 };
 
-// A seed contains only hits belonging to the baseline showers, grouped by plane.
+// A seed may preserve the full cmerger collection or supply combined alternatives.
 // Forced matches preserve the two main showers when attaching a third fragment.
 struct RecoverySeed {
   std::vector<HitList> clusters;
   ClusterMatches forcedMatches;
   std::vector<HitList> coverageGroups;
   bool mergeOnly=false;
+  bool preferExisting=false;
+  unsigned trialLimit=0; // zero uses the remaining shared event budget
+  std::string mode="combine_split";
 };
 
 // Mirrors the pre-publication validity checks in ShrReco3D::SaveShower.
@@ -212,7 +215,7 @@ public:
       return cm;
     };
     if (diagnostic) {
-      *diagnostic = RecoveryResult{};
+      if (!seed) *diagnostic = RecoveryResult{};
       for (std::size_t plane = 0; plane < candidates.size(); ++plane)
         for (const auto& candidate : candidates[plane]) {
           const auto first = diagnostic->clusters.size();
@@ -236,14 +239,27 @@ public:
       for (std::size_t b = 0; b <= candidates[1].size(); ++b)
         for (std::size_t c = 0; c <= candidates[2].size(); ++c)
           if (a+b+c) combinations.push_back({{a,b,c}});
-    // Try coherent multi-plane splits first under the reconstruction budget.
-    std::stable_sort(combinations.begin(),combinations.end(),[](const auto& a, const auto& b) {
-      return std::count_if(a.begin(),a.end(),[](auto x){return x!=0;}) >
-             std::count_if(b.begin(),b.end(),[](auto x){return x!=0;});
+    // Seed recovery first tests one promising split against existing clusters.
+    // Combined-all inputs still favor simultaneous multi-plane splits.
+    std::stable_sort(combinations.begin(),combinations.end(),[&](const auto& a, const auto& b) {
+      const auto na=std::count_if(a.begin(),a.end(),[](auto x){return x!=0;});
+      const auto nb=std::count_if(b.begin(),b.end(),[](auto x){return x!=0;});
+      if (!(seed && seed->preferExisting)) return na>nb;
+      if (na!=nb) return na<nb;
+      if (na==1) {
+        const Split *sa=nullptr, *sb=nullptr;
+        for (unsigned pl=0; pl<3; ++pl) {
+          if (a[pl]) sa=&candidates[pl][a[pl]-1].split;
+          if (b[pl]) sb=&candidates[pl][b[pl]-1].split;
+        }
+        return betterSplit(*sa,*sb);
+      }
+      return false;
     });
     if (mergeOnly) combinations.push_back({{0,0,0}});
     for (const auto& choices : combinations) {
-          if (!budget.canTry(maxMatchTrials_,maxRecoShowers_)) {
+          if ((seed && seed->trialLimit && trials>=seed->trialLimit) ||
+              !budget.canTry(maxMatchTrials_,maxRecoShowers_)) {
             budgetSkipped += combinations.size()-trials;
             break;
           }
@@ -363,7 +379,7 @@ public:
           struct ScoredHypothesis { MatchHypothesis hypothesis; PointConsistency score; };
           std::vector<ScoredHypothesis> scored;
           for (const auto& h : hypotheses) {
-            if (h.matches.size()<2) continue;
+            if (h.matches.size()<2 || (seed && seed->preferExisting && h.matches.size()!=2)) continue;
             if (h.clusterSearch) {
               bool contributes=false;
               for (const auto& children : splitChildren) {
@@ -394,10 +410,29 @@ public:
               }
             }
             if (!compatible) continue;
+            // Ownership and retained-plane coverage are known before expensive
+            // shower reconstruction. Do not spend the budget dropping a fragment.
+            if (seed) {
+              bool covered=true;
+              for (const auto& group : seed->coverageGroups) {
+                std::size_t n=0, kept=0;
+                for (const auto& hit : uniqueHitsInOrder(group)) {
+                  if (h.twoPlaneFallback && !(h.planeMask&(1u<<hit->WireID().Plane))) continue;
+                  ++n; kept+=used.count(hit);
+                }
+                if (!n || double(kept)/n<minCoverage_) covered=false;
+              }
+              if (!covered) {
+                ++coverageRejected;
+                std::cout << "[SingleShowerRecovery] event " << e.id()
+                  << " pre_reco_coverage_reject=1 plane_mask=" << h.planeMask << std::endl;
+                continue;
+              }
+            }
             const auto assigned=assignedFor(h.matches);
             const auto score=pointConsistency(assigned);
             bool supported=true;
-            if (mergeOnly || h.twoPlaneFallback) {
+            if (mergeOnly || h.twoPlaneFallback || (seed && seed->preferExisting)) {
               const auto support=consistentShowerWeights(assigned);
               supported=useSpacePoints_ && score.weight>=minPointWeight_ && support[0]>=minTwoPlaneWeight_ && support[1]>=minTwoPlaneWeight_;
               std::array<std::array<double,3>,2> charge{};

@@ -98,6 +98,7 @@ private:
   bool fDiagnoseThreeShowers = false;
   bool fRecoverTwoShowers = false;
   bool fCombineTwoShowers = false, fRecoverThreeShowers = false;
+  bool fCmergerRecoverySeeds = false;
   double fThreeDetachedFraction = 0.2, fFragmentAttachmentAngle = 35.;
   double fDetachedDistance = 20., fDetachedFraction = 0.3, fRecoveredStartDistance = 5.;
   
@@ -273,6 +274,7 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
     fDiagnoseTwoShowers = recovery.get<bool>("DiagnoseTwoShowers",false);
     fDiagnoseThreeShowers = recovery.get<bool>("DiagnoseThreeShowers",false);
     fRecoverTwoShowers = recovery.get<bool>("RecoverTwoShowers",false);
+    fCmergerRecoverySeeds = recovery.get<bool>("UseCmergerRecoverySeeds",false);
     fCombineTwoShowers = recovery.get<bool>("CombineTwoShowerHits",false);
     fRecoverThreeShowers = recovery.get<bool>("RecoverThreeShowers",false);
     fThreeDetachedFraction = recovery.get<double>("ThreeShowerMaxFragmentChargeFraction",0.2);
@@ -444,7 +446,37 @@ void ShrReco3D::produce(art::Event & e)
             seed.clusters.push_back(showerreco::recovery::uniqueHitsInOrder(plane));
           }
         };
-        if (recoverTwo) {
+        if (fCmergerRecoverySeeds) {
+          RecoverySeed existing;
+          existing.coverageGroups=hits;
+          existing.preferExisting=true; existing.trialLimit=1; existing.mode="existing_cmerger";
+          const auto input=e.getValidHandle<std::vector<recob::Cluster>>(fClusproducer);
+          const art::FindManyP<recob::Hit> links(input,e,fClusproducer);
+          HitList allCmergerHits;
+          for (std::size_t ci=0; ci<input->size(); ++ci) {
+            existing.clusters.push_back(showerreco::recovery::uniqueHitsInOrder(links.at(ci)));
+            allCmergerHits.insert(allCmergerHits.end(),existing.clusters.back().begin(),existing.clusters.back().end());
+          }
+          seeds.push_back(existing);
+          // Attach fragment hits at cluster level BEFORE splitting and matching.
+          // Main-shower memberships identify parent alternatives, not final matches.
+          for (std::size_t parent=0; parent<hits.size(); ++parent) if (int(parent)!=fragment) {
+            RecoverySeed attached=existing;
+            attached.mode="attach_cluster_then_split";
+            if (showerreco::recovery::attachFragment(attached.clusters,hits[parent],hits[fragment],
+                  [](const auto& hit) { return hit->WireID().Plane; })) {
+              std::cout << "[SingleShowerRecovery] event " << e.id()
+                << " cluster_attachment_parent=" << parent << " seed_index=" << seeds.size() << std::endl;
+              seeds.push_back(std::move(attached));
+            }
+          }
+          if (recoverThree || fCombineTwoShowers) {
+            RecoverySeed combined;
+            combined.coverageGroups=hits; combined.mode="combined_cmerger";
+            addPlanes(combined,allCmergerHits,nullptr);
+            seeds.push_back(std::move(combined));
+          }
+        } else if (recoverTwo) {
           baseline=output_shower_v.begin()+indices[1-fragment];
           if (fCombineTwoShowers) {
             RecoverySeed seed;
@@ -469,7 +501,7 @@ void ShrReco3D::produce(art::Event & e)
           std::stable_sort(parents.begin(),parents.end());
           for (const auto& parent : parents) {
             RecoverySeed seed;
-            seed.mergeOnly=true; seed.coverageGroups=hits; seed.forcedMatches.resize(2);
+            seed.mergeOnly=true; seed.mode="fragment_merge"; seed.coverageGroups=hits; seed.forcedMatches.resize(2);
             unsigned m=0;
             for (std::size_t main=0; main<hits.size(); ++main) if (int(main)!=fragment) {
               HitList group=hits[main];
@@ -488,7 +520,7 @@ void ShrReco3D::produce(art::Event & e)
     if (!seeds.empty()) {
       for (std::size_t attempt=0; attempt<seeds.size(); ++attempt) {
         std::cout << "[SingleShowerRecovery] event " << e.id() << " seed_attempt=" << attempt
-          << " recovery_mode=" << (seeds[attempt].mergeOnly ? "fragment_merge" : "combine_split") << std::endl;
+          << " recovery_mode=" << seeds[attempt].mode << std::endl;
         recovered=fRecovery->run(e,fClusproducer,fVtxproducer,originalHits,fRecoveryCalibration,*_manager,gser,
           fSaveSplitCandidates && !seeds[attempt].mergeOnly ? &diagnostic : nullptr,false,
           fRecoveredStartDistance,&seeds[attempt],&budget);
@@ -531,7 +563,7 @@ void ShrReco3D::produce(art::Event & e)
   }
 
   // Inspect multi-shower inputs without matching, reconstruction or replacement.
-  if (fRecovery && fSaveSplitCandidates && !recoverTwo &&
+  if (fRecovery && fSaveSplitCandidates && !recoverTwo && !(recoverThree && fCmergerRecoverySeeds) &&
       ((fDiagnoseTwoShowers && baselineUsable==2) || (fDiagnoseThreeShowers && baselineUsable==3)))
     fRecovery->run(e,fClusproducer,fVtxproducer,{},fRecoveryCalibration,*_manager,gser,&diagnostic,true);
 

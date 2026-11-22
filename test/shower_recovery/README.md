@@ -265,3 +265,70 @@ independent plane-pair selection; compare 12/602, 12/614, 12/616, 97/4881, and
 `fragment_parent`, `attachment_angle`, `initial_match_groups`,
 `substantial_pair_search`, `coverage_group`, `event_reco_showers`, and `status`.
 The source builds and event outcomes still require GPVM validation.
+
+
+## November 21: preserve cmerger clusters during multi-shower recovery
+
+`UseCmergerRecoverySeeds: true` (experimental FCL; C++ default false) replaces
+baseline-hit-only seeds for eligible two- and three-shower events. Eligibility
+remains >20 cm and <30% / <20% total collection charge respectively.
+
+The ordered alternatives are:
+
+1. All original cmerger clusters, including unmatched clusters. Test the highest
+   ranked single-plane split against existing clusters in the other planes.
+2. Attach the detached fragment's hits to a parent cmerger cluster, then split
+   and match again. Try each main baseline shower as a parent. In each plane,
+   select the cluster with the largest overlap with that parent's associated
+   hits. Remove duplicate fragment ownership from other clusters, preserve all
+   other clusters, and abandon an attachment if a fragment plane has no parent
+   overlap. Main-shower labels do not constrain the subsequent matching.
+3. Combine the entire cmerger hit union per plane and try splitting it. For two
+   showers this alternative is controlled by `CombineTwoShowerHits`; for three
+   showers it is included with this new path. This is not the entire NuGraph
+   collection: only hits represented in cmerger are included in the union.
+
+Original and attachment alternatives each get at most one split/match trial,
+so they cannot consume all four matching trials before the combined alternative.
+The remaining shared budget is available to the combined alternative, which
+prioritizes simultaneous multi-plane splits. Every alternative shares the same
+four-proto-shower reconstruction budget. Per-original-shower coverage is checked
+before reconstruction as well as after it, so missing-fragment hypotheses do
+not waste reconstruction attempts. Candidate generation still examines clusters
+up front; this change prioritizes matching with existing clusters, rather than
+claiming a fully lazy geometric splitter or a measured speedup.
+
+Split candidates are ranked with the existing valley/cut score. Existing-cluster
+trials require positive spacepoint support for each shower in addition to the
+configured matching, conflict, charge-balance and coverage checks. The original
+cmatcher itself remains time-overlap based. Recovery still tries both relative
+assignments and supported collection-plus-induction fallbacks. Reconstruction
+must produce two usable showers with starts within 5 cm; otherwise baseline
+output remains. The original cmerger products are never mutated.
+
+`showersplitCandidates` now accumulates candidates from the attempted seeds for
+eligible multi-shower events. Repeated or overlapping candidates may therefore
+appear: this is a diagnostic set of alternatives, not one accepted partition.
+Logs identify `seed_attempt`, `recovery_mode` (`existing_cmerger`,
+`attach_cluster_then_split`, `combined_cmerger`), `cluster_attachment_parent`,
+`seed_index`, and `pre_reco_coverage_reject`. The three-shower diagnostic-only pass
+no longer overwrites candidates from the new recovery path.
+
+To roll back this change independently, set `UseCmergerRecoverySeeds: false`.
+That restores the previous baseline-hit combination / fixed-parent attachment
+paths, including the known 614 limitation. No singleton borrowing, global shower
+validation, cmatcher algorithm change, or induction-only reconstruction is added.
+
+Local validation: all four standalone tests pass with C++17, -O2, -DNDEBUG and
+warnings treated as errors. Added cases verify unmatched-cluster preservation,
+fragment attachment to either parent, complete hit-union conservation,
+deduplication and no partial mutation on missing parent evidence. The art module
+and FCL still need GPVM compilation/execution. Recheck 12/614 and 97/4867, plus
+96/4827 and the earlier successful examples.
+
+Future experiment (not enabled): check all existing cluster/shower assignments
+against mapped SpacePointSolver associations, even when recovery eligibility
+fails. Start with diagnostic-only per-plane-pair support/conflict and measure
+whole-module timing; use cached hit ownership and point associations. A global
+conflict score alone should not trigger replacement without bilateral evidence
+and an independently validated recovery policy.

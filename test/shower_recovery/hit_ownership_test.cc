@@ -27,5 +27,34 @@ int main() {
   for (const auto& plane : grouped) combined.insert(combined.end(),plane.begin(),plane.end());
   CHECK(combined.size()==4); // detached-fragment hits and product identity retained
   CHECK(disjointHits(grouped[0],grouped[1]));
+  // Two existing clusters in plane 1 must survive an attachment in plane 2.
+  const auto planeOf=[](int h) { return unsigned(h/100); };
+  std::vector<std::vector<int>> clusters{{100,101},{110,111},{200,201},{210},{220}};
+  const auto before=clusters;
+  CHECK(attachFragment(clusters,std::vector<int>{100,101,200,201},
+    std::vector<int>{220,220},planeOf));
+  CHECK(clusters[0]==before[0] && clusters[1]==before[1]);
+  CHECK((clusters[2]==std::vector<int>{200,201,220}));
+  CHECK(clusters[3]==before[3] && clusters[4].empty());
+  std::set<int> allBefore, allAfter;
+  for (const auto& c0 : before) allBefore.insert(c0.begin(),c0.end());
+  for (const auto& c0 : clusters) allAfter.insert(c0.begin(),c0.end());
+  CHECK(allBefore==allAfter);
+  CHECK(disjointHits(clusters[2],clusters[3]));
+  // An alternative parent gets the fragment without changing either other view.
+  auto alternate=before;
+  CHECK(attachFragment(alternate,std::vector<int>{110,111,210},std::vector<int>{220},planeOf));
+  CHECK((alternate[3]==std::vector<int>{210,220}));
+  CHECK(alternate[2]==before[2]);
+  // Missing parent evidence in a fragment's plane must not partly mutate inputs.
+  auto unsupported=before;
+  CHECK(!attachFragment(unsupported,std::vector<int>{100,101},std::vector<int>{220},planeOf));
+  CHECK(unsupported==before);
+  // Union input includes unmatched cmerger hits, not just baseline shower hits.
+  std::vector<int> unionHits;
+  for (const auto& c0 : before) unionHits.insert(unionHits.end(),c0.begin(),c0.end());
+  const auto unionPlanes=hitsByPlane(unionHits,planeOf);
+  CHECK((unionPlanes[1]==std::vector<int>{100,101,110,111}));
+  CHECK((unionPlanes[2]==std::vector<int>{200,201,210,220}));
   std::cout << "Hit ownership tests passed\n";
 }
