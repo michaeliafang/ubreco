@@ -542,16 +542,32 @@ void ShrReco3D::produce(art::Event & e)
         }
         std::cout << "[SingleShowerRecovery] event " << e.id() << " seed_attempt=" << attempt
           << " recovery_mode=" << seeds[attempt].mode << std::endl;
-        recovered=fRecovery->run(e,fClusproducer,fVtxproducer,originalHits,fRecoveryCalibration,*_manager,gser,
+        auto candidate=fRecovery->run(e,fClusproducer,fVtxproducer,originalHits,fRecoveryCalibration,*_manager,gser,
           fSaveSplitCandidates && !seeds[attempt].mergeOnly ? &diagnostic : nullptr,false,
           fRecoveredStartDistance,&seeds[attempt],&budget);
-        if (recovered.showers.size()==2) break;
+        if (candidate.showers.size()!=2) continue; // never overwrite a saved valid pair
+        const bool targetMet=seeds[attempt].selectedHitCoverage<=0. ||
+          candidate.selectedCoverage.passes(seeds[attempt].selectedHitCoverage);
+        if (recovered.showers.size()!=2 ||
+            candidate.selectedCoverage.fraction()>recovered.selectedCoverage.fraction()) {
+          recovered=std::move(candidate);
+          std::cout << "[SingleShowerRecovery] event " << e.id()
+            << " saved_recovery_seed=" << attempt
+            << " saved_hit_coverage=" << recovered.selectedCoverage.retained << "/"
+            << recovered.selectedCoverage.total << " coverage_target_met=" << targetMet << std::endl;
+        }
+        if (targetMet) break;
       }
     } else if (!recoverThree) {
       recovered=fRecovery->run(e,fClusproducer,fVtxproducer,
         recoverTwo ? originalHits : pfp_hit_assn_v.at(baseline->fIndex),fRecoveryCalibration,*_manager,gser,
         fSaveSplitCandidates ? &diagnostic : nullptr,false,recoverTwo ? fRecoveredStartDistance : 0.);
     }
+    if (recovered.showers.size()==2 && recovered.selectedCoverage.total)
+      std::cout << "[SingleShowerRecovery] event " << e.id()
+        << " published_hit_coverage=" << recovered.selectedCoverage.retained << "/" << recovered.selectedCoverage.total
+        << " coverage_plane_mask=" << recovered.coveragePlaneMask
+        << " coverage_target_met=" << recovered.selectedCoverage.passes(fSelectedHitCoverage) << std::endl;
     // Never replace a usable baseline by zero, one, or more than two showers.
     if (recovered.showers.size() == 2) {
       art::PtrMaker<recob::Cluster> makeCluster(e, "recovery");

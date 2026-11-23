@@ -68,6 +68,7 @@ bool attachFragment(std::vector<std::vector<Hit>>& clusters,
 
 struct HitCoverage {
   std::size_t retained=0, total=0;
+  double fraction() const { return total ? double(retained)/total : 0.; }
   bool passes(double minimum) const { return total && double(retained)/total>=minimum; }
 };
 // Intersection with the reference product: unrelated hits cannot inflate coverage.

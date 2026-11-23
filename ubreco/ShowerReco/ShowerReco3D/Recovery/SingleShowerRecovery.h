@@ -34,6 +34,8 @@ struct RecoveryResult {
   std::vector<HitList> clusterHits;
   std::vector<std::vector<unsigned int>> matches;
   std::vector<Shower_t> showers;
+  HitCoverage selectedCoverage;
+  unsigned coveragePlaneMask=0;
 };
 
 // A seed may preserve the full cmerger collection or supply combined alternatives.
@@ -416,8 +418,7 @@ public:
               }
             }
             if (!compatible) continue;
-            // Ownership and retained-plane coverage are known before expensive
-            // shower reconstruction. Do not spend the budget dropping a fragment.
+            // Coverage guides further search; it is not a reconstruction veto.
             if (seed && seed->selectedHitCoverage>0.) {
               const auto planeOf=[](const auto& hit) { return hit->WireID().Plane; };
               const auto coverage=retainedPlaneCoverage(seed->coverageReference,used,h.planeMask,planeOf);
@@ -430,7 +431,7 @@ public:
                 << " selected_hit_coverage=" << coverage.retained << "/" << coverage.total
                 << " coverage_plane_mask=" << h.planeMask
                 << " coverage_with_fragment=" << withFragment.retained << "/" << withFragment.total << std::endl;
-              if (!coverage.passes(seed->selectedHitCoverage)) { ++coverageRejected; continue; }
+
             }
             if (seed && seed->selectedHitCoverage<=0.) {
               bool covered=true;
@@ -600,8 +601,12 @@ public:
               std::cout << "[SingleShowerRecovery] event " << e.id()
                 << " final_selected_hit_coverage=" << coverage.retained << "/" << coverage.total
                 << " coverage_plane_mask=" << retainedPlanes << std::endl;
-              if (!coverage.passes(seed->selectedHitCoverage)) { ++coverageRejected; continue; }
-            } else if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
+              trial.selectedCoverage=coverage;
+              trial.coveragePlaneMask=retainedPlanes;
+              std::cout << "[SingleShowerRecovery] event " << e.id()
+                << " coverage_target_met=" << coverage.passes(seed->selectedHitCoverage) << std::endl;
+            }
+            if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
             // Require coverage of every original shower separately: a small
             // fragment must not disappear behind good aggregate coverage.
             bool groupCoverage=true;

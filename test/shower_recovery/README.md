@@ -379,3 +379,26 @@ Tests cover the exact 98% boundary, duplicate and unrelated hits, retained-plane
 normalization, empty references, fragment-union feasibility, and multi-plane
 retry ordering. Real outcomes and whole-module timing require GPVM validation;
 recheck 4890, 614, 4867, 4881 and the successful single-shower recovery examples.
+
+
+## Correction: 98% is a search target, not an acceptance cut
+
+This supersedes the November 23 description of coverage as a requirement.
+`MinSelectedHitCoverage` retains its name for configuration compatibility, but
+is only the threshold for stopping additional attempts. Below-target candidates
+are allowed through reconstruction. Any valid recovered pair is saved, even
+below 98%; failed later attempts never overwrite it. A later valid pair replaces
+it only if its retained-plane selected-hit coverage fraction is higher (ties
+keep the earlier pair). Reaching the target ends the search. Otherwise the best
+saved pair is published when alternatives or the shared budget are exhausted.
+
+The pre-existing aggregate `MinOriginalHitFraction` (80% by default) remains a
+separate safety check. Per-fragment coverage is not required in the new mode.
+All normal matching, support, ownership, split-contribution and reconstruction
+checks remain. The 98% value itself never increments coverage rejection counts.
+
+Inspect `saved_recovery_seed`, `saved_hit_coverage`, `published_hit_coverage`,
+`coverage_plane_mask` and `coverage_target_met`. A published pair with
+`coverage_target_met=0` is an intentional retained recovery, not a failure.
+Coverage is still measured relative to unique selected hits in retained planes;
+fractions from different plane subsets do not measure full three-plane coverage.

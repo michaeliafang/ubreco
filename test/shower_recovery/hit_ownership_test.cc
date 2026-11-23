@@ -72,5 +72,12 @@ int main() {
   CHECK(!retainedPlaneCoverage(reference,selected,6u,planeOf).passes(.98));
   CHECK(!retainedPlaneCoverage(reference,selected,1u,planeOf).passes(.98));
   CHECK(!retainedPlaneCoverage(std::vector<int>{},selected,7u,planeOf).passes(.98));
+  // A valid below-target pair is retained; only a better valid result replaces it.
+  HitCoverage saved{97,100};
+  CHECK(!saved.passes(.98));
+  const HitCoverage worse{95,100}, better{99,100}, empty{};
+  CHECK(!(worse.fraction()>saved.fraction()));
+  CHECK(!(empty.fraction()>saved.fraction()));
+  CHECK(better.fraction()>saved.fraction() && better.passes(.98));
   std::cout << "Hit ownership tests passed\n";
 }

@@ -10,7 +10,7 @@ single_shower_recovery: {
   DiagnoseTwoShowers: true    # diagnostic fallback for ineligible two-shower events
   DiagnoseThreeShowers: true  # also save diagnostic splits of the original inputs
   RecoverTwoShowers: true     # independent experimental option
-  MinSelectedHitCoverage: 0.98 # unique output hits / selected hits in retained planes
+  MinSelectedHitCoverage: 0.98 # search stopping target, NOT a veto on a valid recovered pair
   CoverageHitProducer: "nugraphshowerhits"
   UseCmergerRecoverySeeds: true # preserve existing clusters; attach/split/match alternatives
   CombineTwoShowerHits: true  # combine both baseline showers per plane before splitting
