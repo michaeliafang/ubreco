@@ -99,6 +99,8 @@ private:
   bool fRecoverTwoShowers = false;
   bool fCombineTwoShowers = false, fRecoverThreeShowers = false;
   bool fCmergerRecoverySeeds = false;
+  double fSelectedHitCoverage=0.;
+  art::InputTag fCoverageHitProducer;
   double fThreeDetachedFraction = 0.2, fFragmentAttachmentAngle = 35.;
   double fDetachedDistance = 20., fDetachedFraction = 0.3, fRecoveredStartDistance = 5.;
   
@@ -274,6 +276,10 @@ ShrReco3D::ShrReco3D(fhicl::ParameterSet const & p)
     fDiagnoseTwoShowers = recovery.get<bool>("DiagnoseTwoShowers",false);
     fDiagnoseThreeShowers = recovery.get<bool>("DiagnoseThreeShowers",false);
     fRecoverTwoShowers = recovery.get<bool>("RecoverTwoShowers",false);
+    fSelectedHitCoverage=recovery.get<double>("MinSelectedHitCoverage",0.);
+    if (!std::isfinite(fSelectedHitCoverage) || fSelectedHitCoverage<0. || fSelectedHitCoverage>1.)
+      throw std::invalid_argument("MinSelectedHitCoverage must be between zero and one");
+    if (fSelectedHitCoverage>0.) fCoverageHitProducer=recovery.get<art::InputTag>("CoverageHitProducer");
     fCmergerRecoverySeeds = recovery.get<bool>("UseCmergerRecoverySeeds",false);
     fCombineTwoShowers = recovery.get<bool>("CombineTwoShowerHits",false);
     fRecoverThreeShowers = recovery.get<bool>("RecoverThreeShowers",false);
@@ -449,7 +455,13 @@ void ShrReco3D::produce(art::Event & e)
         if (fCmergerRecoverySeeds) {
           RecoverySeed existing;
           existing.coverageGroups=hits;
-          existing.preferExisting=true; existing.trialLimit=1; existing.mode="existing_cmerger";
+          existing.selectedHitCoverage=fSelectedHitCoverage;
+          existing.detachedHits=hits[fragment];
+          if (fSelectedHitCoverage>0.) {
+            const auto reference=e.getValidHandle<std::vector<recob::Hit>>(fCoverageHitProducer);
+            for (std::size_t hi=0; hi<reference->size(); ++hi) existing.coverageReference.emplace_back(reference,hi);
+          }
+          existing.preferExisting=true; existing.trialLimit=fSelectedHitCoverage>0. ? 2 : 1; existing.mode="existing_cmerger";
           const auto input=e.getValidHandle<std::vector<recob::Cluster>>(fClusproducer);
           const art::FindManyP<recob::Hit> links(input,e,fClusproducer);
           HitList allCmergerHits;
@@ -462,7 +474,7 @@ void ShrReco3D::produce(art::Event & e)
           // Main-shower memberships identify parent alternatives, not final matches.
           for (std::size_t parent=0; parent<hits.size(); ++parent) if (int(parent)!=fragment) {
             RecoverySeed attached=existing;
-            attached.mode="attach_cluster_then_split";
+            attached.mode="attach_cluster_then_split"; attached.trialLimit=1;
             if (showerreco::recovery::attachFragment(attached.clusters,hits[parent],hits[fragment],
                   [](const auto& hit) { return hit->WireID().Plane; })) {
               std::cout << "[SingleShowerRecovery] event " << e.id()
@@ -473,6 +485,9 @@ void ShrReco3D::produce(art::Event & e)
           if (recoverThree || fCombineTwoShowers) {
             RecoverySeed combined;
             combined.coverageGroups=hits; combined.mode="combined_cmerger";
+            combined.selectedHitCoverage=existing.selectedHitCoverage;
+            combined.coverageReference=existing.coverageReference;
+            combined.detachedHits=existing.detachedHits;
             addPlanes(combined,allCmergerHits,nullptr);
             seeds.push_back(std::move(combined));
           }
@@ -519,6 +534,12 @@ void ShrReco3D::produce(art::Event & e)
     showerreco::recovery::RecoveryBudget budget;
     if (!seeds.empty()) {
       for (std::size_t attempt=0; attempt<seeds.size(); ++attempt) {
+        if (seeds[attempt].selectedHitCoverage>0. && seeds[attempt].mode=="attach_cluster_then_split" &&
+            !budget.attachmentCanReachCoverage) {
+          std::cout << "[SingleShowerRecovery] event " << e.id()
+            << " seed_attempt=" << attempt << " attachment_skipped=coverage_cannot_reach_threshold" << std::endl;
+          continue;
+        }
         std::cout << "[SingleShowerRecovery] event " << e.id() << " seed_attempt=" << attempt
           << " recovery_mode=" << seeds[attempt].mode << std::endl;
         recovered=fRecovery->run(e,fClusproducer,fVtxproducer,originalHits,fRecoveryCalibration,*_manager,gser,

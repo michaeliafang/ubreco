@@ -42,6 +42,8 @@ struct RecoverySeed {
   std::vector<HitList> clusters;
   ClusterMatches forcedMatches;
   std::vector<HitList> coverageGroups;
+  HitList coverageReference, detachedHits;
+  double selectedHitCoverage=0.; // zero preserves the previous coverage policy
   bool mergeOnly=false;
   bool preferExisting=false;
   unsigned trialLimit=0; // zero uses the remaining shared event budget
@@ -245,7 +247,10 @@ public:
       const auto na=std::count_if(a.begin(),a.end(),[](auto x){return x!=0;});
       const auto nb=std::count_if(b.begin(),b.end(),[](auto x){return x!=0;});
       if (!(seed && seed->preferExisting)) return na>nb;
-      if (na!=nb) return na<nb;
+      if (na!=nb) {
+        if (na==1 || nb==1) return na==1;
+        return na>nb;
+      }
       if (na==1) {
         const Split *sa=nullptr, *sb=nullptr;
         for (unsigned pl=0; pl<3; ++pl) {
@@ -256,6 +261,7 @@ public:
       }
       return false;
     });
+    if (seed && seed->preferExisting && seed->selectedHitCoverage>0.) promoteMultiPlaneRetry(combinations);
     if (mergeOnly) combinations.push_back({{0,0,0}});
     for (const auto& choices : combinations) {
           if ((seed && seed->trialLimit && trials>=seed->trialLimit) ||
@@ -412,7 +418,21 @@ public:
             if (!compatible) continue;
             // Ownership and retained-plane coverage are known before expensive
             // shower reconstruction. Do not spend the budget dropping a fragment.
-            if (seed) {
+            if (seed && seed->selectedHitCoverage>0.) {
+              const auto planeOf=[](const auto& hit) { return hit->WireID().Plane; };
+              const auto coverage=retainedPlaneCoverage(seed->coverageReference,used,h.planeMask,planeOf);
+              auto augmented=used;
+              augmented.insert(seed->detachedHits.begin(),seed->detachedHits.end());
+              const auto withFragment=retainedPlaneCoverage(seed->coverageReference,augmented,h.planeMask,planeOf);
+              if (seed->mode=="existing_cmerger" && !coverage.passes(seed->selectedHitCoverage) &&
+                  withFragment.passes(seed->selectedHitCoverage)) budget.attachmentCanReachCoverage=true;
+              std::cout << "[SingleShowerRecovery] event " << e.id()
+                << " selected_hit_coverage=" << coverage.retained << "/" << coverage.total
+                << " coverage_plane_mask=" << h.planeMask
+                << " coverage_with_fragment=" << withFragment.retained << "/" << withFragment.total << std::endl;
+              if (!coverage.passes(seed->selectedHitCoverage)) { ++coverageRejected; continue; }
+            }
+            if (seed && seed->selectedHitCoverage<=0.) {
               bool covered=true;
               for (const auto& group : seed->coverageGroups) {
                 std::size_t n=0, kept=0;
@@ -571,11 +591,21 @@ public:
             }
             std::cout << "[SingleShowerRecovery] event " << e.id() << " coverage_retained=" << retained
               << " coverage_considered=" << considered << " coverage_omitted=" << original.size()-considered << std::endl;
-            if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
+            if (seed && seed->selectedHitCoverage>0.) {
+              unsigned retainedPlanes=0;
+              for (const auto& match : trial.matches) for (auto ci : match)
+                retainedPlanes|=1u<<trial.clusters.at(ci).Plane().Plane;
+              const auto coverage=retainedPlaneCoverage(seed->coverageReference,recovered,retainedPlanes,
+                [](const auto& hit) { return hit->WireID().Plane; });
+              std::cout << "[SingleShowerRecovery] event " << e.id()
+                << " final_selected_hit_coverage=" << coverage.retained << "/" << coverage.total
+                << " coverage_plane_mask=" << retainedPlanes << std::endl;
+              if (!coverage.passes(seed->selectedHitCoverage)) { ++coverageRejected; continue; }
+            } else if (!considered || double(retained)/considered < minCoverage_) { ++coverageRejected; continue; }
             // Require coverage of every original shower separately: a small
             // fragment must not disappear behind good aggregate coverage.
             bool groupCoverage=true;
-            if (seed) for (std::size_t g=0; g<seed->coverageGroups.size(); ++g) {
+            if (seed && seed->selectedHitCoverage<=0.) for (std::size_t g=0; g<seed->coverageGroups.size(); ++g) {
               const auto unique=uniqueHitsInOrder(seed->coverageGroups[g]);
               std::size_t n=0, kept=0;
               for (const auto& hit : unique) {

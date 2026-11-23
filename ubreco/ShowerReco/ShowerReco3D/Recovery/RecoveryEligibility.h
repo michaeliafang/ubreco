@@ -53,9 +53,19 @@ inline double attachmentAngle(const std::array<double,3>& direction,
   const double cosine=std::max(-1.,std::min(1.,dot/std::sqrt(a*b)));
   return std::acos(cosine)*180./std::acos(-1.);
 }
+// After the best single-plane trial, retry a multi-plane combination before
+// spending attempts on other single-plane alternatives.
+inline void promoteMultiPlaneRetry(std::vector<std::array<std::size_t,3>>& choices) {
+  if (choices.size()<2) return;
+  const auto multi=std::find_if(choices.begin()+1,choices.end(),[](const auto& c) {
+    return std::count_if(c.begin(),c.end(),[](auto x){return x!=0;})>1;
+  });
+  if (multi!=choices.end()) std::rotate(choices.begin()+1,multi,multi+1);
+}
 // Shared across attempts in an event, including both possible fragment parents.
 struct RecoveryBudget {
   std::size_t trials=0, showers=0;
+  bool attachmentCanReachCoverage=false;
   bool canTry(std::size_t maxTrials, std::size_t maxShowers) const {
     return trials<maxTrials && showers<=maxShowers && maxShowers-showers>=2;
   }

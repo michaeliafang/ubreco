@@ -89,5 +89,14 @@ int main() {
     std::set<unsigned> unique;
     for (const auto& match : h.matches) for (auto ci : match) CHECK(unique.insert(ci).second);
   }
+  std::vector<std::array<std::size_t,3>> choices{{{0,0,1}},{{0,1,0}},{{0,1,1}}};
+  promoteMultiPlaneRetry(choices);
+  CHECK((choices[0]==std::array<std::size_t,3>{{0,0,1}}));
+  CHECK((choices[1]==std::array<std::size_t,3>{{0,1,1}}));
+  CHECK((choices[2]==std::array<std::size_t,3>{{0,1,0}}));
+  choices={{{0,0,1}},{{0,1,0}}};
+  promoteMultiPlaneRetry(choices);
+  CHECK((choices[1]==std::array<std::size_t,3>{{0,1,0}}));
+  choices.clear(); promoteMultiPlaneRetry(choices); CHECK(choices.empty());
   std::cout << "Recovery option tests passed\n";
 }

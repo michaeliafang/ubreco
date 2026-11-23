@@ -66,6 +66,23 @@ bool attachFragment(std::vector<std::vector<Hit>>& clusters,
   return true;
 }
 
+struct HitCoverage {
+  std::size_t retained=0, total=0;
+  bool passes(double minimum) const { return total && double(retained)/total>=minimum; }
+};
+// Intersection with the reference product: unrelated hits cannot inflate coverage.
+template <class Hit, class PlaneOf>
+HitCoverage retainedPlaneCoverage(const std::vector<Hit>& reference,
+                                 const std::set<Hit>& selected, unsigned mask, PlaneOf planeOf) {
+  HitCoverage result;
+  for (const auto& hit : uniqueHitsInOrder(reference)) {
+    const auto plane=planeOf(hit);
+    if (plane>=3 || !(mask&(1u<<plane))) continue;
+    ++result.total; result.retained+=selected.count(hit);
+  }
+  return result;
+}
+
 } // namespace recovery
 } // namespace showerreco
 #endif

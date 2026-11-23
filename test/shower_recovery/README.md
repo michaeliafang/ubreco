@@ -332,3 +332,50 @@ fails. Start with diagnostic-only per-plane-pair support/conflict and measure
 whole-module timing; use cached hit ownership and point associations. A global
 conflict score alone should not trigger replacement without bilateral evidence
 and an independently validated recovery policy.
+
+
+## November 23: retained-plane selected-hit coverage
+
+For eligible multi-shower cmerger-seed recovery, the experimental FCL now sets
+`MinSelectedHitCoverage: 0.98` and `CoverageHitProducer: "nugraphshowerhits"`.
+The reference is the actual selected-hit product, not baseline shower hits or
+all available cmerger associations. Count unique art::Ptr identities, intersect
+with the proposed output, and restrict both numerator and denominator to the
+candidate's retained planes. The threshold is inclusive. Empty reference subsets
+fail. This is a hit-count criterion, not a charge fraction.
+
+The new check replaces aggregate-baseline and per-baseline-shower coverage for
+these seeds. A small detached fragment can be omitted if the output pair reaches
+98% overall in its retained planes. Existing matching, spacepoint support,
+charge balance, split contribution, ownership, and reconstruction/start cuts
+remain in force. Coverage is checked before reconstruction and verified again
+for the actual accepted pair. A coverage-passing pair that fails reconstruction
+does not end the search.
+
+Existing-cluster input gets up to two matching trials: best single-plane split,
+then the highest-priority available multi-plane combination (or another single
+if no multi exists). A fragment attachment is attempted only if a compatible
+existing-input hypothesis is below threshold and its union with the fragment
+could reach threshold in those same planes. This is a feasibility check, not a
+promise that attachment will produce that assignment. Attachment must itself
+pass actual coverage. If no pair succeeds, the combined-cmerger alternative is
+tried within the remaining shared budget. The four matching trials and four
+additional reconstructed showers are unchanged; budget exhaustion may prevent
+later alternatives, particularly with two candidate fragment parents.
+
+Logs: `selected_hit_coverage=N/D`, `coverage_with_fragment=N/D`,
+`coverage_plane_mask`, `final_selected_hit_coverage=N/D`, and
+`attachment_skipped=coverage_cannot_reach_threshold`. Diagnostic split generation
+still runs before matching and may include unused alternatives. The combined
+input cannot restore selected hits absent from every cmerger cluster.
+
+Set `MinSelectedHitCoverage: 0` to restore the previous coverage and one-trial
+existing-input behavior. Ordinary single-baseline-shower recovery is unchanged.
+Use an explicitly process-qualified CoverageHitProducer if the input contains
+multiple selected-hit products: art::Ptr identity must match cmerger associations.
+The future global spacepoint audit remains deferred.
+
+Tests cover the exact 98% boundary, duplicate and unrelated hits, retained-plane
+normalization, empty references, fragment-union feasibility, and multi-plane
+retry ordering. Real outcomes and whole-module timing require GPVM validation;
+recheck 4890, 614, 4867, 4881 and the successful single-shower recovery examples.

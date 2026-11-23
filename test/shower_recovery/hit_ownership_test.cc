@@ -56,5 +56,21 @@ int main() {
   const auto unionPlanes=hitsByPlane(unionHits,planeOf);
   CHECK((unionPlanes[1]==std::vector<int>{100,101,110,111}));
   CHECK((unionPlanes[2]==std::vector<int>{200,201,210,220}));
+  std::vector<int> reference;
+  std::set<int> selected;
+  for (int h=100; h<200; ++h) { reference.push_back(h); if (h<198) selected.insert(h); }
+  reference.push_back(100); // duplicate association must not change denominator
+  reference.push_back(200); // omitted plane must not enter the denominator
+  selected.insert(999); // non-reference hit must not inflate numerator
+  auto coverage=retainedPlaneCoverage(reference,selected,2u,planeOf);
+  CHECK(coverage.retained==98 && coverage.total==100 && coverage.passes(.98));
+  selected.erase(197);
+  coverage=retainedPlaneCoverage(reference,selected,2u,planeOf);
+  CHECK(!coverage.passes(.98));
+  selected.insert(197); // adding the fragment makes attachment worth trying
+  CHECK(retainedPlaneCoverage(reference,selected,2u,planeOf).passes(.98));
+  CHECK(!retainedPlaneCoverage(reference,selected,6u,planeOf).passes(.98));
+  CHECK(!retainedPlaneCoverage(reference,selected,1u,planeOf).passes(.98));
+  CHECK(!retainedPlaneCoverage(std::vector<int>{},selected,7u,planeOf).passes(.98));
   std::cout << "Hit ownership tests passed\n";
 }
